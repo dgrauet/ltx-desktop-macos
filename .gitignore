@@ -1,0 +1,34 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+*.egg-info/
+dist/
+build/
+
+# Models (large files, downloaded separately)
+models/*.safetensors
+models/*.bin
+models/*.gguf
+models/*.mlx
+
+# Xcode
+app/LTXDesktop.xcodeproj/project.xcworkspace/xcuserdata/
+app/LTXDesktop.xcodeproj/xcuserdata/
+DerivedData/
+*.xcuserstate
+
+# IDE
+.vscode/
+.idea/
+
+# Environment
+.env
+.env.local

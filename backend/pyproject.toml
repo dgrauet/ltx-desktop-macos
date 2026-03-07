@@ -1,0 +1,53 @@
+[project]
+name = "ltx-desktop-macos-backend"
+version = "0.1.0"
+description = "Python backend for LTX Desktop macOS — MLX local inference"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+dependencies = [
+    # MLX stack
+    "mlx>=0.31.0",
+    "mlx-video-with-audio>=0.1.3",
+    "mlx-lm>=0.24.0",
+
+    # API
+    "fastapi>=0.115.0",
+    "uvicorn>=0.32.0",
+    "websockets>=13.0",
+    "python-multipart>=0.0.12",
+
+    # ML / Tensor
+    "numpy>=1.26.0",
+    "safetensors>=0.4.0",
+    "huggingface-hub>=0.26.0",
+    "transformers>=4.51.0",
+
+    # Video/Audio processing
+    "opencv-python>=4.10.0",
+    "tqdm>=4.66.0",
+    "pillow>=10.4.0",
+    "soundfile>=0.12.0",
+
+    # Audio (local TTS)
+    "mlx-audio>=0.3.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24.0",
+    "httpx>=0.27.0",
+    "ruff>=0.7.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["../tests"]
+asyncio_mode = "auto"
+timeout = 600
