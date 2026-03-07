@@ -8,6 +8,7 @@ class GenerationViewModel: ObservableObject {
     @Published var selectedResolution: Resolution = .landscape768
     @Published var numFrames = 97
     @Published var steps = 8
+    @Published var fps = 24
     @Published var seed = 42
     @Published var isGenerating = false
     @Published var progress: Double = 0
@@ -72,7 +73,8 @@ class GenerationViewModel: ObservableObject {
                     height: selectedResolution.height,
                     numFrames: numFrames,
                     steps: steps,
-                    seed: seed
+                    seed: seed,
+                    fps: fps
                 )
                 jobResponse = try await service.generateImageToVideo(request: request)
             } else {
@@ -82,7 +84,8 @@ class GenerationViewModel: ObservableObject {
                     height: selectedResolution.height,
                     numFrames: numFrames,
                     steps: steps,
-                    seed: seed
+                    seed: seed,
+                    fps: fps
                 )
                 jobResponse = try await service.generateTextToVideo(request: request)
             }

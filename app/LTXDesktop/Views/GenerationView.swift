@@ -42,10 +42,19 @@ struct GenerationView: View {
                             .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
                     )
 
-                // Enhance button
-                if enhanceEnabled {
-                    HStack {
-                        Spacer()
+                // Word count + Enhance button
+                HStack(alignment: .center) {
+                    Spacer()
+                    let wordCount = vm.prompt.split(separator: " ").count
+                    Text("\(wordCount) words")
+                        .font(.caption)
+                        .foregroundStyle(
+                            wordCount > 200 ? .red :
+                            wordCount > 150 ? .orange :
+                            Color.secondary
+                        )
+
+                    if enhanceEnabled {
                         Button(action: {
                             Task { await vm.enhancePrompt(using: backendService) }
                         }) {
@@ -88,6 +97,18 @@ struct GenerationView: View {
                         ForEach([9, 25, 49, 97], id: \.self) { n in
                             Text("\(n)").tag(n)
                         }
+                    }
+                    .frame(width: 80)
+                }
+
+                // FPS
+                HStack {
+                    Text("FPS")
+                        .font(.subheadline)
+                    Spacer()
+                    Picker("", selection: $vm.fps) {
+                        Text("24").tag(24)
+                        Text("30").tag(30)
                     }
                     .frame(width: 80)
                 }

@@ -2,6 +2,7 @@
 
 Sprint 1: system endpoints, T2V generation, WebSocket progress.
 Sprint 2: preview, I2V, intermediate frame streaming.
+Sprint 4: LoRA management, audio (TTS/music/mix), video export, FCPXML export.
 """
 
 from __future__ import annotations
@@ -25,6 +26,9 @@ from engine.pipelines.image_to_video import ImageToVideoPipeline
 from engine.pipelines.retake import RetakePipeline
 from engine.pipelines.extend import ExtendPipeline
 from engine.prompt_enhancer import PromptEnhancer
+from engine.lora_manager import LoRAManager
+from audio.tts_engine import TTSEngine
+from audio.audio_mixer import AudioMixer
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
@@ -38,6 +42,9 @@ i2v_pipeline = ImageToVideoPipeline(model_manager)
 retake_pipeline = RetakePipeline(model_manager)
 extend_pipeline = ExtendPipeline(model_manager)
 prompt_enhancer = PromptEnhancer()
+lora_manager = LoRAManager(model_manager)
+tts_engine = TTSEngine()
+audio_mixer = AudioMixer()
 
 # Job tracking: job_id -> {status, progress, result, error}
 jobs: dict[str, dict[str, Any]] = {}
@@ -162,6 +169,70 @@ class MemoryResponse(BaseModel):
     system_available_gb: float
     generation_count_since_reload: int
     next_reload_in: int
+
+
+class LoRAInfo(BaseModel):
+    """LoRA metadata."""
+    id: str
+    name: str
+    path: str
+    lora_type: str
+    compatible: bool
+    loaded: bool
+    size_mb: float
+
+
+class LoadLoRARequest(BaseModel):
+    """Request to load a LoRA by ID."""
+    lora_id: str = Field(..., min_length=1)
+
+
+class TTSRequest(BaseModel):
+    """Text-to-speech synthesis request."""
+    text: str = Field(..., min_length=1, max_length=5000)
+    voice: str = Field(default="default")
+    speed: float = Field(default=1.0, ge=0.5, le=2.0)
+
+
+class MusicRequest(BaseModel):
+    """Background music generation request."""
+    genre: str = Field(default="ambient")
+    duration: float = Field(default=10.0, ge=1.0, le=300.0)
+
+
+class MixRequest(BaseModel):
+    """Audio mix request — combine TTS and/or music into a video."""
+    video_path: str = Field(..., min_length=1)
+    tts_path: str | None = None
+    music_path: str | None = None
+    music_volume: float = Field(default=0.3, ge=0.0, le=1.0)
+    tts_volume: float = Field(default=1.0, ge=0.0, le=1.0)
+
+
+class ExportVideoRequest(BaseModel):
+    """Video re-encode/export request."""
+    video_path: str = Field(..., min_length=1)
+    codec: str = Field(default="h264", pattern="^(h264|h265|hevc|prores)$")
+    output_format: str = Field(default="mp4", pattern="^(mp4|mov)$")
+    bitrate: str = Field(default="8M")
+
+
+class ExportFCPXMLRequest(BaseModel):
+    """FCPXML export request for Final Cut Pro."""
+    video_path: str = Field(..., min_length=1)
+    clip_name: str = Field(default="LTX Generated Clip")
+    frame_rate: str = Field(default="24/1")
+
+
+class PathResponse(BaseModel):
+    """Response carrying a single output file path."""
+    output_path: str
+
+
+class SuccessResponse(BaseModel):
+    """Generic success/failure response."""
+    success: bool
+    message: str = ""
 
 
 # --- System endpoints ---
@@ -576,6 +647,167 @@ async def _broadcast_progress(
 
     for ws in dead:
         ws_connections[job_id].remove(ws)
+
+
+# --- LoRA endpoints ---
+
+@app.get("/api/v1/loras", response_model=list[LoRAInfo])
+async def list_loras():
+    """List all available LoRAs."""
+    loras = lora_manager.list_loras()
+    return [LoRAInfo(**vars(lora)) for lora in loras]
+
+
+@app.post("/api/v1/loras/load", response_model=SuccessResponse)
+async def load_lora(req: LoadLoRARequest):
+    """Load (activate) a LoRA by ID."""
+    try:
+        lora_manager.load_lora(req.lora_id)
+        return SuccessResponse(success=True, message=f"LoRA '{req.lora_id}' loaded")
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"LoRA '{req.lora_id}' not found")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/v1/loras/unload/{lora_id}", response_model=SuccessResponse)
+async def unload_lora(lora_id: str):
+    """Unload (deactivate) a LoRA by ID."""
+    lora_manager.unload_lora(lora_id)
+    return SuccessResponse(success=True, message=f"LoRA '{lora_id}' unloaded")
+
+
+# --- Audio endpoints ---
+
+@app.post("/api/v1/audio/tts", response_model=PathResponse)
+async def audio_tts(req: TTSRequest):
+    """Generate TTS audio from text (local, on-device)."""
+    result = await asyncio.get_event_loop().run_in_executor(
+        None, lambda: tts_engine.synthesize(req.text, req.voice, req.speed)
+    )
+    return PathResponse(output_path=result)
+
+
+@app.post("/api/v1/audio/music", response_model=PathResponse)
+async def audio_music(req: MusicRequest):
+    """Generate background music (stub: sine wave placeholder)."""
+    result = await asyncio.get_event_loop().run_in_executor(
+        None, lambda: audio_mixer.generate_music_stub(req.genre, req.duration)
+    )
+    return PathResponse(output_path=result)
+
+
+@app.post("/api/v1/audio/mix", response_model=PathResponse)
+async def audio_mix(req: MixRequest):
+    """Mix TTS and/or music into a video."""
+    result = await asyncio.get_event_loop().run_in_executor(
+        None,
+        lambda: audio_mixer.mix(
+            video_path=req.video_path,
+            tts_path=req.tts_path,
+            music_path=req.music_path,
+            music_volume=req.music_volume,
+            tts_volume=req.tts_volume,
+        ),
+    )
+    return PathResponse(output_path=result)
+
+
+# --- Export endpoints ---
+
+@app.post("/api/v1/export/video", response_model=PathResponse)
+async def export_video(req: ExportVideoRequest):
+    """Re-encode a video with the specified codec and format."""
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    ffmpeg_bin = shutil.which("ffmpeg") or "/opt/homebrew/bin/ffmpeg"
+    if not Path(ffmpeg_bin).exists():
+        raise HTTPException(status_code=503, detail="ffmpeg not found")
+
+    output_dir = Path.home() / ".ltx-desktop" / "exports"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    codec_map = {"h264": "libx264", "h265": "libx265", "hevc": "libx265", "prores": "prores_ks"}
+    vcodec = codec_map.get(req.codec, "libx264")
+    ext = "mov" if req.output_format == "mov" or req.codec == "prores" else "mp4"
+
+    output_path = output_dir / f"export_{str(uuid.uuid4())[:8]}.{ext}"
+
+    cmd = [
+        ffmpeg_bin, "-y", "-i", req.video_path,
+        "-c:v", vcodec, "-b:v", req.bitrate,
+        "-c:a", "aac", "-b:a", "192k",
+        "-pix_fmt", "yuv420p",
+        str(output_path),
+    ]
+    result = await asyncio.get_event_loop().run_in_executor(
+        None, lambda: subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    )
+    if result.returncode != 0:
+        raise HTTPException(status_code=500, detail=f"Export failed: {result.stderr[:200]}")
+    return PathResponse(output_path=str(output_path))
+
+
+@app.post("/api/v1/export/fcpxml", response_model=PathResponse)
+async def export_fcpxml(req: ExportFCPXMLRequest):
+    """Export a video clip as FCPXML for Final Cut Pro."""
+    import json as _json
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    output_dir = Path.home() / ".ltx-desktop" / "exports"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / f"export_{str(uuid.uuid4())[:8]}.fcpxml"
+
+    # Probe duration with ffprobe
+    ffprobe_bin = shutil.which("ffprobe") or "/opt/homebrew/bin/ffprobe"
+    duration_s = 4.0
+    if Path(ffprobe_bin).exists():
+        probe = subprocess.run(
+            [ffprobe_bin, "-v", "quiet", "-print_format", "json", "-show_format", req.video_path],
+            capture_output=True, text=True,
+        )
+        if probe.returncode == 0:
+            try:
+                duration_s = float(_json.loads(probe.stdout)["format"]["duration"])
+            except Exception:
+                pass
+
+    # Build minimal FCPXML 1.11
+    fps_num, fps_den = req.frame_rate.split("/")
+    frame_duration = f"1/{fps_num}s"
+    total_frames = int(duration_s * int(fps_num) / int(fps_den))
+    duration_str = f"{total_frames}/{fps_num}s"
+    clip_uid = str(uuid.uuid4())
+
+    fcpxml = f'''<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE fcpxml>
+<fcpxml version="1.11">
+    <resources>
+        <format id="r1" name="FFVideoFormat{fps_num}p" frameDuration="{frame_duration}" width="1920" height="1080"/>
+        <asset id="r2" name="{req.clip_name}" uid="{clip_uid}" start="0s" duration="{duration_str}" hasVideo="1" hasAudio="1">
+            <media-rep kind="original-media" src="file://{req.video_path}"/>
+        </asset>
+    </resources>
+    <library>
+        <event name="LTX Desktop Exports">
+            <project name="{req.clip_name}">
+                <sequence format="r1" duration="{duration_str}" tcStart="0s" tcFormat="NDF">
+                    <spine>
+                        <asset-clip ref="r2" offset="0s" name="{req.clip_name}" duration="{duration_str}" start="0s"/>
+                    </spine>
+                </sequence>
+            </project>
+        </event>
+    </library>
+</fcpxml>'''
+
+    output_path.write_text(fcpxml, encoding="utf-8")
+    log.info("FCPXML exported: %s", output_path)
+    return PathResponse(output_path=str(output_path))
 
 
 # --- Entry point ---

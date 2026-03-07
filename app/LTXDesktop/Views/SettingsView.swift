@@ -38,6 +38,11 @@ struct SettingsView: View {
                 .tabItem {
                     Label("Memory", systemImage: "memorychip")
                 }
+
+            loraTab
+                .tabItem {
+                    Label("LoRA", systemImage: "puzzlepiece.extension")
+                }
         }
         .padding()
         .onAppear {
@@ -289,6 +294,48 @@ struct SettingsView: View {
             Spacer()
         }
         .padding()
+    }
+
+    // MARK: - LoRA Tab
+
+    private var loraTab: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                Text("LoRA Models")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "puzzlepiece.extension")
+                            .foregroundStyle(.secondary)
+                        Text("Manage LoRAs in the LoRA tab")
+                            .font(.body)
+                        Spacer()
+                    }
+                    Text("LoRAs extend the model with specialized capabilities: camera control, detail enhancement, and custom styles. Select the LoRA tab in the sidebar to browse, load, and toggle available LoRAs.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .foregroundStyle(.orange)
+                            .font(.caption)
+                        Text("LoRAs must be compatible with the LTX-2.3 latent space. LTX-2.0 LoRAs are not compatible.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.top, 4)
+                }
+                .padding(14)
+                .background(Color(.controlBackgroundColor).opacity(0.5))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+
+                Spacer()
+            }
+            .padding()
+        }
     }
 
     // MARK: - Components

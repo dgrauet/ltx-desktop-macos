@@ -102,6 +102,31 @@ class BackendService: ObservableObject {
         }
     }
 
+    // MARK: - LoRA Management
+
+    func listLoRAs() async throws -> [LoRAInfo] {
+        return try await get("/api/v1/loras")
+    }
+
+    func loadLoRA(loraId: String) async throws -> SuccessResponse {
+        struct Body: Encodable { let lora_id: String }
+        return try await post("/api/v1/loras/load", body: Body(lora_id: loraId))
+    }
+
+    func unloadLoRA(loraId: String) async throws -> SuccessResponse {
+        return try await post("/api/v1/loras/unload/\(loraId)", body: EmptyBody())
+    }
+
+    // MARK: - Export
+
+    func exportVideo(request: ExportVideoRequest) async throws -> PathResponse {
+        return try await post("/api/v1/export/video", body: request)
+    }
+
+    func exportFCPXML(request: ExportFCPXMLRequest) async throws -> PathResponse {
+        return try await post("/api/v1/export/fcpxml", body: request)
+    }
+
     // MARK: - HTTP Helpers
 
     private func get<T: Decodable>(_ path: String) async throws -> T {
@@ -125,6 +150,11 @@ class BackendService: ObservableObject {
         }
         return try decoder.decode(T.self, from: data)
     }
+}
+
+struct SuccessResponse: Decodable {
+    let success: Bool
+    let message: String
 }
 
 enum BackendError: LocalizedError {

@@ -126,6 +126,8 @@ struct VideoCard: View {
     let thumbnail: NSImage?
     let isSelected: Bool
 
+    @State private var isHovered = false
+
     private static let dateFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateStyle = .short
@@ -151,8 +153,22 @@ struct VideoCard: View {
                         .font(.system(size: 28))
                         .foregroundStyle(.secondary)
                 }
+
+                // Play overlay on hover
+                if isHovered {
+                    Color.black.opacity(0.25)
+                    Image(systemName: "play.circle.fill")
+                        .font(.system(size: 36))
+                        .foregroundStyle(.white.opacity(0.9))
+                        .shadow(radius: 4)
+                }
             }
             .clipShape(RoundedRectangle(cornerRadius: 6))
+            .onHover { hovering in
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    isHovered = hovering
+                }
+            }
 
             // Metadata
             VStack(alignment: .leading, spacing: 2) {
@@ -202,7 +218,9 @@ struct VideoDetailView: View {
     let item: VideoItem
     let onDelete: () -> Void
 
+    @EnvironmentObject var backendService: BackendService
     @State private var player: AVPlayer?
+    @State private var showExportSheet = false
 
     private static let fullDateFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -258,6 +276,24 @@ struct VideoDetailView: View {
 
                     Divider()
                         .padding(.top, 4)
+
+                    Button(action: { showExportSheet = true }) {
+                        Label("Export Video", systemImage: "square.and.arrow.up")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .sheet(isPresented: $showExportSheet) {
+                        ExportSheet(videoPath: item.outputPath, clipName: item.displayName)
+                            .environmentObject(backendService)
+                    }
+
+                    Button(action: {
+                        NSWorkspace.shared.open(item.fileURL)
+                    }) {
+                        Label("Open in QuickLook", systemImage: "eye")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
 
                     Button(role: .destructive, action: onDelete) {
                         Label("Delete Video", systemImage: "trash")

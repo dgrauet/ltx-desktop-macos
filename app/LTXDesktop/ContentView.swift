@@ -7,6 +7,7 @@ struct ContentView: View {
     enum Tab: String, CaseIterable {
         case generation = "Generation"
         case history = "History"
+        case lora = "LoRA"
         case settings = "Settings"
     }
 
@@ -28,6 +29,8 @@ struct ContentView: View {
                     GenerationView()
                 case .history:
                     HistoryView()
+                case .lora:
+                    LoRAView()
                 case .settings:
                     SettingsView()
                 }
@@ -59,6 +62,7 @@ struct ContentView: View {
         switch tab {
         case .generation: return "wand.and.sparkles"
         case .history: return "clock.arrow.circlepath"
+        case .lora: return "puzzlepiece.extension"
         case .settings: return "gear"
         }
     }
