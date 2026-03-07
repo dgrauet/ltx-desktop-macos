@@ -27,11 +27,19 @@ fi
 
 # 2. Check huggingface-cli
 echo -e "${BLUE}Checking huggingface-cli...${NC}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VENV_HF="$SCRIPT_DIR/../backend/.venv/bin/huggingface-cli"
+
 if command -v huggingface-cli &>/dev/null; then
+    HF_CLI="huggingface-cli"
     echo -e "${GREEN}✓ huggingface-cli available${NC}"
+elif [ -f "$VENV_HF" ]; then
+    HF_CLI="$VENV_HF"
+    echo -e "${GREEN}✓ huggingface-cli found in backend venv${NC}"
 else
-    echo -e "${YELLOW}⚠ huggingface-cli not found. Installing huggingface-hub...${NC}"
-    pip3 install --user huggingface-hub
+    echo -e "${YELLOW}⚠ huggingface-cli not found. Installing via uv tool...${NC}"
+    uv tool install huggingface-hub
+    HF_CLI="huggingface-cli"
     echo -e "${GREEN}✓ huggingface-cli installed${NC}"
 fi
 
@@ -48,25 +56,25 @@ if [ -d "$LTX_CACHE_DIR" ] && [ -f "$LTX_CACHE_DIR/refs/main" ]; then
     echo -e "${GREEN}✓ Already downloaded${NC}"
 else
     echo -e "${YELLOW}  Downloading (this may take a while)...${NC}"
-    huggingface-cli download "$LTX_MODEL"
+    $HF_CLI download "$LTX_MODEL"
     echo -e "${GREEN}✓ LTX-2.3 model downloaded${NC}"
 fi
 
-# 4. Download Qwen3.5-2B for prompt enhancement (~1.2GB)
-QWEN_MODEL="Qwen/Qwen3.5-2B"
-QWEN_CACHE_DIR="$HF_CACHE/models--Qwen--Qwen3.5-2B"
+# 4. Download Qwen3.5-2B-4bit (MLX quantized) for prompt enhancement (~1.2GB)
+QWEN_MODEL="mlx-community/Qwen3.5-2B-4bit"
+QWEN_CACHE_DIR="$HF_CACHE/models--mlx-community--Qwen3.5-2B-4bit"
 
 echo ""
-echo -e "${BLUE}[2/2] Qwen3.5-2B prompt enhancer${NC}"
+echo -e "${BLUE}[2/2] Qwen3.5-2B-4bit prompt enhancer (MLX quantized)${NC}"
 echo -e "  Model: ${QWEN_MODEL}"
-echo -e "  Size:  ~4GB (will be quantized to ~1.2GB at runtime)"
+echo -e "  Size:  ~1.2GB"
 
 if [ -d "$QWEN_CACHE_DIR" ] && [ -f "$QWEN_CACHE_DIR/refs/main" ]; then
     echo -e "${GREEN}✓ Already downloaded${NC}"
 else
     echo -e "${YELLOW}  Downloading...${NC}"
-    huggingface-cli download "$QWEN_MODEL"
-    echo -e "${GREEN}✓ Qwen3.5-2B downloaded${NC}"
+    $HF_CLI download "$QWEN_MODEL"
+    echo -e "${GREEN}✓ Qwen3.5-2B-4bit downloaded${NC}"
 fi
 
 # 5. Verify and report
@@ -87,7 +95,7 @@ fi
 
 if [ -d "$QWEN_CACHE_DIR" ]; then
     QWEN_SIZE=$(du -sg "$QWEN_CACHE_DIR" 2>/dev/null | cut -f1 || echo "?")
-    echo -e "  Qwen3.5:   ${GREEN}${QWEN_SIZE}GB${NC} — $QWEN_CACHE_DIR"
+    echo -e "  Qwen3.5-4bit: ${GREEN}${QWEN_SIZE}GB${NC} — $QWEN_CACHE_DIR"
     TOTAL_SIZE=$((TOTAL_SIZE + QWEN_SIZE))
 else
     echo -e "  Qwen3.5:   ${RED}not found${NC}"
