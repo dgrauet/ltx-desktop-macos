@@ -14,7 +14,7 @@ import uuid
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
 from engine.memory_manager import aggressive_cleanup, get_memory_stats
@@ -22,6 +22,9 @@ from engine.model_manager import ModelManager
 from engine.pipelines.text_to_video import TextToVideoPipeline
 from engine.pipelines.preview import PreviewPipeline
 from engine.pipelines.image_to_video import ImageToVideoPipeline
+from engine.pipelines.retake import RetakePipeline
+from engine.pipelines.extend import ExtendPipeline
+from engine.prompt_enhancer import PromptEnhancer
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
@@ -32,6 +35,9 @@ model_manager = ModelManager()
 t2v_pipeline = TextToVideoPipeline(model_manager)
 preview_pipeline = PreviewPipeline(model_manager)
 i2v_pipeline = ImageToVideoPipeline(model_manager)
+retake_pipeline = RetakePipeline(model_manager)
+extend_pipeline = ExtendPipeline(model_manager)
+prompt_enhancer = PromptEnhancer()
 
 # Job tracking: job_id -> {status, progress, result, error}
 jobs: dict[str, dict[str, Any]] = {}
@@ -92,6 +98,39 @@ class I2VRequest(BaseModel):
     steps: int = Field(default=8, ge=1, le=50)
     seed: int = Field(default=42)
     guidance_scale: float = Field(default=1.0, ge=0.0, le=20.0)
+    fps: int = Field(default=24, ge=1, le=60)
+
+
+class EnhanceRequest(BaseModel):
+    """Prompt enhancement request."""
+    prompt: str = Field(..., min_length=1, max_length=2000)
+
+
+class EnhanceResponse(BaseModel):
+    """Prompt enhancement response."""
+    original: str
+    enhanced: str
+
+
+class RetakeRequest(BaseModel):
+    """Retake (segment regeneration) request."""
+    source_video_path: str = Field(..., min_length=1)
+    prompt: str = Field(..., min_length=1, max_length=2000)
+    start_time_s: float = Field(..., ge=0.0)
+    end_time_s: float = Field(..., gt=0.0)
+    steps: int = Field(default=8, ge=1, le=50)
+    seed: int = Field(default=42)
+    fps: int = Field(default=24, ge=1, le=60)
+
+
+class ExtendRequest(BaseModel):
+    """Video extension request."""
+    source_video_path: str = Field(..., min_length=1)
+    prompt: str = Field(..., min_length=1, max_length=2000)
+    direction: str = Field(default="forward", pattern="^(forward|backward)$")
+    extension_frames: int = Field(default=49, ge=9)
+    steps: int = Field(default=8, ge=1, le=50)
+    seed: int = Field(default=42)
     fps: int = Field(default=24, ge=1, le=60)
 
 
@@ -324,6 +363,121 @@ async def _run_i2v(job_id: str, req: I2VRequest) -> None:
         jobs[job_id]["error"] = str(e)
         log.error("I2V %s failed: %s", job_id, e)
         await _broadcast_progress(job_id, 0, 0, 0.0, error=str(e))
+
+
+@app.post("/api/v1/generate/retake", response_model=JobResponse)
+async def generate_retake(req: RetakeRequest):
+    """Start a retake (segment regeneration) job."""
+    job_id = str(uuid.uuid4())[:8]
+    jobs[job_id] = {"status": "queued", "progress": 0.0, "result": None, "error": None}
+
+    asyncio.create_task(_run_retake(job_id, req))
+
+    return JobResponse(job_id=job_id)
+
+
+@app.post("/api/v1/generate/extend", response_model=JobResponse)
+async def generate_extend(req: ExtendRequest):
+    """Start a video extension job."""
+    job_id = str(uuid.uuid4())[:8]
+    jobs[job_id] = {"status": "queued", "progress": 0.0, "result": None, "error": None}
+
+    asyncio.create_task(_run_extend(job_id, req))
+
+    return JobResponse(job_id=job_id)
+
+
+async def _run_retake(job_id: str, req: RetakeRequest) -> None:
+    """Execute retake generation in background."""
+    jobs[job_id]["status"] = "running"
+
+    async def progress_cb(step: int, total: int, pct: float, preview_frame: str | None = None) -> None:
+        jobs[job_id]["progress"] = pct
+        await _broadcast_progress(job_id, step, total, pct, preview_frame=preview_frame)
+
+    try:
+        result = await retake_pipeline.generate(
+            source_video_path=req.source_video_path,
+            prompt=req.prompt,
+            start_time_s=req.start_time_s,
+            end_time_s=req.end_time_s,
+            steps=req.steps,
+            seed=req.seed,
+            fps=req.fps,
+            progress_callback=progress_cb,
+        )
+        jobs[job_id]["status"] = "completed"
+        jobs[job_id]["progress"] = 1.0
+        jobs[job_id]["result"] = {
+            "job_id": result.job_id,
+            "output_path": result.output_path,
+            "duration_seconds": result.duration_seconds,
+            "memory_after": result.memory_after,
+            "stages": result.stages,
+        }
+        await _broadcast_progress(job_id, 0, 0, 1.0, done=True)
+        log.info("Retake %s completed in %.2fs", job_id, result.duration_seconds)
+
+    except Exception as e:
+        jobs[job_id]["status"] = "failed"
+        jobs[job_id]["error"] = str(e)
+        log.error("Retake %s failed: %s", job_id, e)
+        await _broadcast_progress(job_id, 0, 0, 0.0, error=str(e))
+
+
+async def _run_extend(job_id: str, req: ExtendRequest) -> None:
+    """Execute video extension in background."""
+    jobs[job_id]["status"] = "running"
+
+    async def progress_cb(step: int, total: int, pct: float, preview_frame: str | None = None) -> None:
+        jobs[job_id]["progress"] = pct
+        await _broadcast_progress(job_id, step, total, pct, preview_frame=preview_frame)
+
+    try:
+        result = await extend_pipeline.generate(
+            source_video_path=req.source_video_path,
+            prompt=req.prompt,
+            direction=req.direction,
+            extension_frames=req.extension_frames,
+            steps=req.steps,
+            seed=req.seed,
+            fps=req.fps,
+            progress_callback=progress_cb,
+        )
+        jobs[job_id]["status"] = "completed"
+        jobs[job_id]["progress"] = 1.0
+        jobs[job_id]["result"] = {
+            "job_id": result.job_id,
+            "output_path": result.output_path,
+            "duration_seconds": result.duration_seconds,
+            "memory_after": result.memory_after,
+            "stages": result.stages,
+        }
+        await _broadcast_progress(job_id, 0, 0, 1.0, done=True)
+        log.info("Extend %s completed in %.2fs", job_id, result.duration_seconds)
+
+    except Exception as e:
+        jobs[job_id]["status"] = "failed"
+        jobs[job_id]["error"] = str(e)
+        log.error("Extend %s failed: %s", job_id, e)
+        await _broadcast_progress(job_id, 0, 0, 0.0, error=str(e))
+
+
+# --- Prompt enhancement endpoint ---
+
+@app.post("/api/v1/prompt/enhance", response_model=EnhanceResponse)
+async def enhance_prompt(req: EnhanceRequest):
+    """Enhance a prompt via Qwen3.5-2B (lazy load/unload)."""
+    if not prompt_enhancer.is_available():
+        raise HTTPException(
+            status_code=503,
+            detail="Prompt enhancer not available: install mlx-lm",
+        )
+
+    result = await asyncio.get_event_loop().run_in_executor(
+        None, prompt_enhancer.enhance, req.prompt
+    )
+    return EnhanceResponse(original=req.prompt, enhanced=result)
 
 
 # --- Queue endpoints ---

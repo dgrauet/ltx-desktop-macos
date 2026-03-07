@@ -16,6 +16,7 @@ class GenerationViewModel: ObservableObject {
     @Published var progressiveFrame: NSImage?
     @Published var sourceImagePath: String?
     @Published var sourceImageData: Data?
+    @Published var isEnhancing: Bool = false
 
     enum Resolution: String, CaseIterable, Identifiable {
         case landscape768 = "768x512"
@@ -162,6 +163,19 @@ class GenerationViewModel: ObservableObject {
         }
 
         isGenerating = false
+    }
+
+    func enhancePrompt(using service: BackendService) async {
+        guard !prompt.isEmpty else { return }
+        defer { isEnhancing = false }
+        isEnhancing = true
+        errorMessage = nil
+        do {
+            let response = try await service.enhancePrompt(prompt: prompt)
+            prompt = response.enhanced
+        } catch {
+            errorMessage = "Enhance failed: \(error.localizedDescription)"
+        }
     }
 
     func handleImageDrop(urls: [URL]) {

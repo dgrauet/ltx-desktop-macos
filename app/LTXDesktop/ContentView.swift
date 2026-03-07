@@ -27,8 +27,7 @@ struct ContentView: View {
                 case .generation:
                     GenerationView()
                 case .history:
-                    Text("History — Coming in Sprint 3")
-                        .foregroundStyle(.secondary)
+                    HistoryView()
                 case .settings:
                     SettingsView()
                 }

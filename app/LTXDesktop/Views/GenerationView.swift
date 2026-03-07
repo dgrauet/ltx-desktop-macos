@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 struct GenerationView: View {
     @EnvironmentObject var backendService: BackendService
     @StateObject private var vm = GenerationViewModel()
+    @AppStorage("promptEnhanceEnabled") private var enhanceEnabled: Bool = true
 
     var body: some View {
         HSplitView {
@@ -40,6 +41,30 @@ struct GenerationView: View {
                         RoundedRectangle(cornerRadius: 8)
                             .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
                     )
+
+                // Enhance button
+                if enhanceEnabled {
+                    HStack {
+                        Spacer()
+                        Button(action: {
+                            Task { await vm.enhancePrompt(using: backendService) }
+                        }) {
+                            HStack(spacing: 4) {
+                                if vm.isEnhancing {
+                                    ProgressView()
+                                        .scaleEffect(0.6)
+                                } else {
+                                    Image(systemName: "sparkles")
+                                }
+                                Text(vm.isEnhancing ? "Enhancing..." : "Enhance")
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(vm.prompt.isEmpty || vm.isEnhancing || vm.isGenerating)
+                        .keyboardShortcut("e", modifiers: .command)
+                    }
+                }
 
                 // Resolution
                 HStack {

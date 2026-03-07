@@ -44,6 +44,23 @@ class BackendService: ObservableObject {
         return try await post("/api/v1/queue/\(jobId)/cancel", body: EmptyBody())
     }
 
+    // MARK: - Prompt Enhancement
+
+    func enhancePrompt(prompt: String) async throws -> EnhanceResponse {
+        struct Body: Encodable { let prompt: String }
+        return try await post("/api/v1/prompt/enhance", body: Body(prompt: prompt))
+    }
+
+    // MARK: - Retake & Extend
+
+    func generateRetake(request: RetakeRequest) async throws -> JobResponse {
+        return try await post("/api/v1/generate/retake", body: request)
+    }
+
+    func generateExtend(request: ExtendRequest) async throws -> JobResponse {
+        return try await post("/api/v1/generate/extend", body: request)
+    }
+
     // MARK: - WebSocket Progress
 
     func connectProgress(jobId: String) -> AsyncStream<ProgressUpdate> {
