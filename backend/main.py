@@ -545,9 +545,15 @@ async def enhance_prompt(req: EnhanceRequest):
             detail="Prompt enhancer not available: install mlx-lm",
         )
 
-    result = await asyncio.get_event_loop().run_in_executor(
-        None, prompt_enhancer.enhance, req.prompt
-    )
+    try:
+        result = await asyncio.get_event_loop().run_in_executor(
+            None, prompt_enhancer.enhance, req.prompt
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Prompt enhancement failed: {exc}",
+        )
     return EnhanceResponse(original=req.prompt, enhanced=result)
 
 
