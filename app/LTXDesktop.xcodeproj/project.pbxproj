@@ -7,18 +7,24 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		A100000001 /* LTXDesktopApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000001; };
-		A100000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000002; };
-		A100000003 /* ProcessManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000003; };
-		A100000004 /* BackendService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000004; };
-		A100000005 /* GenerationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000005; };
-		A100000006 /* GenerationViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000006; };
-		A100000007 /* GenerationJob.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000007; };
-		A100000008 /* MemoryStats.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000008; };
-		A100000009 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A200000009; };
+		0AAC86222F5C6215008A3AFC /* HistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AAC86212F5C6215008A3AFC /* HistoryView.swift */; };
+		0AAC86242F5C6215008A3AFC /* LoRAView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AAC86232F5C6215008A3AFC /* LoRAView.swift */; };
+		0AAC86262F5C6216008A3AFC /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AAC86252F5C6216008A3AFC /* SettingsView.swift */; };
+		A100000001 /* LTXDesktopApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000001 /* LTXDesktopApp.swift */; };
+		A100000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000002 /* ContentView.swift */; };
+		A100000003 /* ProcessManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000003 /* ProcessManager.swift */; };
+		A100000004 /* BackendService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000004 /* BackendService.swift */; };
+		A100000005 /* GenerationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000005 /* GenerationView.swift */; };
+		A100000006 /* GenerationViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000006 /* GenerationViewModel.swift */; };
+		A100000007 /* GenerationJob.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000007 /* GenerationJob.swift */; };
+		A100000008 /* MemoryStats.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000008 /* MemoryStats.swift */; };
+		A100000009 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A200000009 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		0AAC86212F5C6215008A3AFC /* HistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryView.swift; sourceTree = "<group>"; };
+		0AAC86232F5C6215008A3AFC /* LoRAView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoRAView.swift; sourceTree = "<group>"; };
+		0AAC86252F5C6216008A3AFC /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		A200000001 /* LTXDesktopApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LTXDesktopApp.swift; sourceTree = "<group>"; };
 		A200000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		A200000003 /* ProcessManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessManager.swift; sourceTree = "<group>"; };
@@ -42,7 +48,7 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		A400000001 /* Root */ = {
+		A400000001 = {
 			isa = PBXGroup;
 			children = (
 				A400000002 /* LTXDesktop */,
@@ -68,6 +74,9 @@
 			isa = PBXGroup;
 			children = (
 				A200000005 /* GenerationView.swift */,
+				0AAC86212F5C6215008A3AFC /* HistoryView.swift */,
+				0AAC86232F5C6215008A3AFC /* LoRAView.swift */,
+				0AAC86252F5C6216008A3AFC /* SettingsView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -157,7 +166,7 @@
 				en,
 				Base,
 			);
-			mainGroup = A400000001 /* Root */;
+			mainGroup = A400000001;
 			productRefGroup = A400000010 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -189,8 +198,11 @@
 				A100000004 /* BackendService.swift in Sources */,
 				A100000005 /* GenerationView.swift in Sources */,
 				A100000006 /* GenerationViewModel.swift in Sources */,
+				0AAC86242F5C6215008A3AFC /* LoRAView.swift in Sources */,
 				A100000007 /* GenerationJob.swift in Sources */,
+				0AAC86222F5C6215008A3AFC /* HistoryView.swift in Sources */,
 				A100000008 /* MemoryStats.swift in Sources */,
+				0AAC86262F5C6216008A3AFC /* SettingsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -314,7 +326,6 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
-
 	};
 	rootObject = A800000001 /* Project object */;
 }
