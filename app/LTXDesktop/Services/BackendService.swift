@@ -28,6 +28,14 @@ class BackendService: ObservableObject {
         return try await post("/api/v1/generate/text-to-video", body: request)
     }
 
+    func generatePreview(request: PreviewRequest) async throws -> JobResponse {
+        return try await post("/api/v1/generate/preview", body: request)
+    }
+
+    func generateImageToVideo(request: I2VRequest) async throws -> JobResponse {
+        return try await post("/api/v1/generate/image-to-video", body: request)
+    }
+
     func getJobStatus(jobId: String) async throws -> JobStatus {
         return try await get("/api/v1/queue/\(jobId)")
     }

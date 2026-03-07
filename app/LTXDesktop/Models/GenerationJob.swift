@@ -17,6 +17,31 @@ struct T2VRequest: Codable {
     }
 }
 
+struct PreviewRequest: Codable {
+    var prompt: String
+    var seed: Int = 42
+    var fps: Int = 24
+}
+
+struct I2VRequest: Codable {
+    var prompt: String
+    var sourceImagePath: String
+    var width: Int = 768
+    var height: Int = 512
+    var numFrames: Int = 97
+    var steps: Int = 8
+    var seed: Int = 42
+    var guidanceScale: Double = 1.0
+    var fps: Int = 24
+
+    enum CodingKeys: String, CodingKey {
+        case prompt, width, height, steps, seed, fps
+        case sourceImagePath = "source_image_path"
+        case numFrames = "num_frames"
+        case guidanceScale = "guidance_scale"
+    }
+}
+
 struct JobResponse: Codable {
     let jobId: String
 
@@ -57,10 +82,12 @@ struct ProgressUpdate: Codable {
     let pct: Double?
     let done: Bool?
     let error: String?
+    let previewFrame: String?
 
     enum CodingKeys: String, CodingKey {
         case step, pct, done, error
         case jobId = "job_id"
         case totalSteps = "total_steps"
+        case previewFrame = "preview_frame"
     }
 }

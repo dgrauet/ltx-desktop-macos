@@ -1,5 +1,6 @@
 import SwiftUI
 import AVKit
+import UniformTypeIdentifiers
 
 struct GenerationView: View {
     @EnvironmentObject var backendService: BackendService
@@ -23,6 +24,9 @@ struct GenerationView: View {
     private var controlsPanel: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
+                // Image drop zone for I2V
+                imageDropZone
+
                 // Prompt
                 Text("Prompt")
                     .font(.headline)
@@ -86,23 +90,38 @@ struct GenerationView: View {
 
                 Divider()
 
-                // Generate button
-                Button(action: {
-                    Task { await vm.generate(using: backendService) }
-                }) {
-                    HStack {
-                        if vm.isGenerating {
-                            ProgressView()
-                                .scaleEffect(0.7)
+                // Generate + Preview buttons
+                HStack(spacing: 8) {
+                    Button(action: {
+                        Task { await vm.generate(using: backendService) }
+                    }) {
+                        HStack {
+                            if vm.isGenerating {
+                                ProgressView()
+                                    .scaleEffect(0.7)
+                            }
+                            Text(vm.isGenerating ? "Generating..." : "Generate")
+                                .frame(maxWidth: .infinity)
                         }
-                        Text(vm.isGenerating ? "Generating..." : "Generate")
-                            .frame(maxWidth: .infinity)
                     }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .disabled(vm.prompt.isEmpty || vm.isGenerating)
+                    .keyboardShortcut("g", modifiers: .command)
+
+                    Button(action: {
+                        Task { await vm.generatePreview(using: backendService) }
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "eye")
+                            Text("Preview")
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .disabled(vm.prompt.isEmpty || vm.isGenerating)
+                    .keyboardShortcut("p", modifiers: .command)
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .disabled(vm.prompt.isEmpty || vm.isGenerating)
-                .keyboardShortcut("g", modifiers: .command)
 
                 // Progress
                 if vm.isGenerating {
@@ -127,6 +146,80 @@ struct GenerationView: View {
         }
     }
 
+    // MARK: - Image Drop Zone
+
+    private var imageDropZone: some View {
+        Group {
+            if let imageData = vm.sourceImageData,
+               let nsImage = NSImage(data: imageData) {
+                // Show thumbnail + clear button
+                HStack {
+                    Image(nsImage: nsImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(height: 80)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Source Image")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(vm.sourceImagePath?.components(separatedBy: "/").last ?? "image")
+                            .font(.caption2)
+                            .lineLimit(1)
+                        Button("Clear") {
+                            vm.clearSourceImage()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                    Spacer()
+                }
+                .padding(8)
+                .background(Color(.controlBackgroundColor).opacity(0.5))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            } else {
+                // Drop zone
+                VStack(spacing: 6) {
+                    Image(systemName: "photo.badge.plus")
+                        .font(.title2)
+                        .foregroundStyle(.secondary)
+                    Text("Drop image for Image-to-Video")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: 70)
+                .background(Color(.controlBackgroundColor).opacity(0.3))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [6, 3]))
+                        .foregroundStyle(.secondary.opacity(0.4))
+                )
+                .onDrop(of: [UTType.fileURL], isTargeted: nil) { providers in
+                    handleDrop(providers: providers)
+                    return true
+                }
+            }
+        }
+    }
+
+    private func handleDrop(providers: [NSItemProvider]) {
+        guard let provider = providers.first else { return }
+        provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { data, _ in
+            guard let urlData = data as? Data,
+                  let url = URL(dataRepresentation: urlData, relativeTo: nil) else { return }
+
+            let imageTypes = ["png", "jpg", "jpeg", "tiff", "heic", "webp"]
+            guard imageTypes.contains(url.pathExtension.lowercased()) else { return }
+
+            DispatchQueue.main.async {
+                vm.handleImageDrop(urls: [url])
+            }
+        }
+    }
+
     // MARK: - Preview Panel
 
     private var previewPanel: some View {
@@ -134,6 +227,18 @@ struct GenerationView: View {
             if let videoURL = vm.outputVideoURL {
                 VideoPlayer(player: AVPlayer(url: videoURL))
                     .clipShape(RoundedRectangle(cornerRadius: 12))
+            } else if vm.isGenerating, let frame = vm.progressiveFrame {
+                // Progressive diffusion display during generation
+                VStack(spacing: 8) {
+                    Image(nsImage: frame)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                    Text("Generating...")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 VStack(spacing: 12) {
                     Image(systemName: "film")

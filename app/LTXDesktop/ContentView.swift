@@ -30,8 +30,7 @@ struct ContentView: View {
                     Text("History — Coming in Sprint 3")
                         .foregroundStyle(.secondary)
                 case .settings:
-                    Text("Settings — Coming in Sprint 3")
-                        .foregroundStyle(.secondary)
+                    SettingsView()
                 }
             }
         }

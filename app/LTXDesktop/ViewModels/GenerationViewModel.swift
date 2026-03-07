@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import AppKit
 
 @MainActor
 class GenerationViewModel: ObservableObject {
@@ -12,14 +13,17 @@ class GenerationViewModel: ObservableObject {
     @Published var progress: Double = 0
     @Published var errorMessage: String?
     @Published var outputVideoURL: URL?
+    @Published var progressiveFrame: NSImage?
+    @Published var sourceImagePath: String?
+    @Published var sourceImageData: Data?
 
     enum Resolution: String, CaseIterable, Identifiable {
-        case landscape768 = "768×512"
-        case portrait512 = "512×768"
-        case landscape1280 = "1280×704"
-        case portrait704 = "704×1280"
-        case fullHD = "1920×1080"
-        case portraitHD = "1080×1920"
+        case landscape768 = "768x512"
+        case portrait512 = "512x768"
+        case landscape1280 = "1280x704"
+        case portrait704 = "704x1280"
+        case fullHD = "1920x1080"
+        case portraitHD = "1080x1920"
 
         var id: String { rawValue }
         var label: String { rawValue }
@@ -54,21 +58,84 @@ class GenerationViewModel: ObservableObject {
         progress = 0
         errorMessage = nil
         outputVideoURL = nil
-
-        let request = T2VRequest(
-            prompt: prompt,
-            width: selectedResolution.width,
-            height: selectedResolution.height,
-            numFrames: numFrames,
-            steps: steps,
-            seed: seed
-        )
+        progressiveFrame = nil
 
         do {
-            let jobResponse = try await service.generateTextToVideo(request: request)
+            let jobResponse: JobResponse
+
+            if let imagePath = sourceImagePath {
+                let request = I2VRequest(
+                    prompt: prompt,
+                    sourceImagePath: imagePath,
+                    width: selectedResolution.width,
+                    height: selectedResolution.height,
+                    numFrames: numFrames,
+                    steps: steps,
+                    seed: seed
+                )
+                jobResponse = try await service.generateImageToVideo(request: request)
+            } else {
+                let request = T2VRequest(
+                    prompt: prompt,
+                    width: selectedResolution.width,
+                    height: selectedResolution.height,
+                    numFrames: numFrames,
+                    steps: steps,
+                    seed: seed
+                )
+                jobResponse = try await service.generateTextToVideo(request: request)
+            }
+
             let jobId = jobResponse.jobId
 
-            // Connect to WebSocket for progress
+            for await update in service.connectProgress(jobId: jobId) {
+                if let pct = update.pct {
+                    progress = pct
+                }
+                if let frameB64 = update.previewFrame,
+                   let frameData = Data(base64Encoded: frameB64) {
+                    progressiveFrame = NSImage(data: frameData)
+                }
+                if let error = update.error {
+                    errorMessage = error
+                    isGenerating = false
+                    return
+                }
+                if update.done == true {
+                    break
+                }
+            }
+
+            let status = try await service.getJobStatus(jobId: jobId)
+            if status.status == "completed", let result = status.result {
+                outputVideoURL = URL(fileURLWithPath: result.outputPath)
+                progressiveFrame = nil
+            } else if let error = status.error {
+                errorMessage = error
+            }
+
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+
+        isGenerating = false
+    }
+
+    func generatePreview(using service: BackendService) async {
+        guard !prompt.isEmpty else { return }
+
+        isGenerating = true
+        progress = 0
+        errorMessage = nil
+        outputVideoURL = nil
+        progressiveFrame = nil
+
+        let request = PreviewRequest(prompt: prompt, seed: seed)
+
+        do {
+            let jobResponse = try await service.generatePreview(request: request)
+            let jobId = jobResponse.jobId
+
             for await update in service.connectProgress(jobId: jobId) {
                 if let pct = update.pct {
                     progress = pct
@@ -83,7 +150,6 @@ class GenerationViewModel: ObservableObject {
                 }
             }
 
-            // Get final job status
             let status = try await service.getJobStatus(jobId: jobId)
             if status.status == "completed", let result = status.result {
                 outputVideoURL = URL(fileURLWithPath: result.outputPath)
@@ -96,5 +162,16 @@ class GenerationViewModel: ObservableObject {
         }
 
         isGenerating = false
+    }
+
+    func handleImageDrop(urls: [URL]) {
+        guard let url = urls.first else { return }
+        sourceImagePath = url.path
+        sourceImageData = try? Data(contentsOf: url)
+    }
+
+    func clearSourceImage() {
+        sourceImagePath = nil
+        sourceImageData = nil
     }
 }

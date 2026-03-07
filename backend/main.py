@@ -1,7 +1,7 @@
 """LTX Desktop macOS — FastAPI Backend.
 
-Single-file MVP for Sprint 1. Provides system endpoints, T2V generation,
-and WebSocket progress streaming.
+Sprint 1: system endpoints, T2V generation, WebSocket progress.
+Sprint 2: preview, I2V, intermediate frame streaming.
 """
 
 from __future__ import annotations
@@ -20,6 +20,8 @@ from pydantic import BaseModel, Field
 from engine.memory_manager import aggressive_cleanup, get_memory_stats
 from engine.model_manager import ModelManager
 from engine.pipelines.text_to_video import TextToVideoPipeline
+from engine.pipelines.preview import PreviewPipeline
+from engine.pipelines.image_to_video import ImageToVideoPipeline
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
@@ -28,6 +30,8 @@ log = logging.getLogger(__name__)
 
 model_manager = ModelManager()
 t2v_pipeline = TextToVideoPipeline(model_manager)
+preview_pipeline = PreviewPipeline(model_manager)
+i2v_pipeline = ImageToVideoPipeline(model_manager)
 
 # Job tracking: job_id -> {status, progress, result, error}
 jobs: dict[str, dict[str, Any]] = {}
@@ -52,7 +56,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="LTX Desktop Backend",
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
@@ -62,6 +66,26 @@ app = FastAPI(
 class T2VRequest(BaseModel):
     """Text-to-Video generation request."""
     prompt: str = Field(..., min_length=1, max_length=2000)
+    width: int = Field(default=768, ge=256, le=1920)
+    height: int = Field(default=512, ge=256, le=1920)
+    num_frames: int = Field(default=97, ge=9)
+    steps: int = Field(default=8, ge=1, le=50)
+    seed: int = Field(default=42)
+    guidance_scale: float = Field(default=1.0, ge=0.0, le=20.0)
+    fps: int = Field(default=24, ge=1, le=60)
+
+
+class PreviewRequest(BaseModel):
+    """Rapid preview generation request. Resolution and steps are fixed."""
+    prompt: str = Field(..., min_length=1, max_length=2000)
+    seed: int = Field(default=42)
+    fps: int = Field(default=24, ge=1, le=60)
+
+
+class I2VRequest(BaseModel):
+    """Image-to-Video generation request."""
+    prompt: str = Field(..., min_length=1, max_length=2000)
+    source_image_path: str = Field(..., min_length=1)
     width: int = Field(default=768, ge=256, le=1920)
     height: int = Field(default=512, ge=256, le=1920)
     num_frames: int = Field(default=97, ge=9)
@@ -167,13 +191,35 @@ async def generate_t2v(req: T2VRequest):
     return JobResponse(job_id=job_id)
 
 
+@app.post("/api/v1/generate/preview", response_model=JobResponse)
+async def generate_preview(req: PreviewRequest):
+    """Start a rapid preview generation job (384x256, 4 steps)."""
+    job_id = str(uuid.uuid4())[:8]
+    jobs[job_id] = {"status": "queued", "progress": 0.0, "result": None, "error": None}
+
+    asyncio.create_task(_run_preview(job_id, req))
+
+    return JobResponse(job_id=job_id)
+
+
+@app.post("/api/v1/generate/image-to-video", response_model=JobResponse)
+async def generate_i2v(req: I2VRequest):
+    """Start an image-to-video generation job."""
+    job_id = str(uuid.uuid4())[:8]
+    jobs[job_id] = {"status": "queued", "progress": 0.0, "result": None, "error": None}
+
+    asyncio.create_task(_run_i2v(job_id, req))
+
+    return JobResponse(job_id=job_id)
+
+
 async def _run_t2v(job_id: str, req: T2VRequest) -> None:
     """Execute T2V generation in background."""
     jobs[job_id]["status"] = "running"
 
-    async def progress_cb(step: int, total: int, pct: float) -> None:
+    async def progress_cb(step: int, total: int, pct: float, preview_frame: str | None = None) -> None:
         jobs[job_id]["progress"] = pct
-        await _broadcast_progress(job_id, step, total, pct)
+        await _broadcast_progress(job_id, step, total, pct, preview_frame=preview_frame)
 
     try:
         result = await t2v_pipeline.generate(
@@ -203,6 +249,80 @@ async def _run_t2v(job_id: str, req: T2VRequest) -> None:
         jobs[job_id]["status"] = "failed"
         jobs[job_id]["error"] = str(e)
         log.error("Job %s failed: %s", job_id, e)
+        await _broadcast_progress(job_id, 0, 0, 0.0, error=str(e))
+
+
+async def _run_preview(job_id: str, req: PreviewRequest) -> None:
+    """Execute rapid preview generation in background."""
+    jobs[job_id]["status"] = "running"
+
+    async def progress_cb(step: int, total: int, pct: float, preview_frame: str | None = None) -> None:
+        jobs[job_id]["progress"] = pct
+        await _broadcast_progress(job_id, step, total, pct, preview_frame=preview_frame)
+
+    try:
+        result = await preview_pipeline.generate(
+            prompt=req.prompt,
+            seed=req.seed,
+            fps=req.fps,
+            progress_callback=progress_cb,
+        )
+        jobs[job_id]["status"] = "completed"
+        jobs[job_id]["progress"] = 1.0
+        jobs[job_id]["result"] = {
+            "job_id": result.job_id,
+            "output_path": result.output_path,
+            "duration_seconds": result.duration_seconds,
+            "memory_after": result.memory_after,
+            "stages": result.stages,
+        }
+        await _broadcast_progress(job_id, 0, 0, 1.0, done=True)
+        log.info("Preview %s completed in %.2fs", job_id, result.duration_seconds)
+
+    except Exception as e:
+        jobs[job_id]["status"] = "failed"
+        jobs[job_id]["error"] = str(e)
+        log.error("Preview %s failed: %s", job_id, e)
+        await _broadcast_progress(job_id, 0, 0, 0.0, error=str(e))
+
+
+async def _run_i2v(job_id: str, req: I2VRequest) -> None:
+    """Execute I2V generation in background."""
+    jobs[job_id]["status"] = "running"
+
+    async def progress_cb(step: int, total: int, pct: float, preview_frame: str | None = None) -> None:
+        jobs[job_id]["progress"] = pct
+        await _broadcast_progress(job_id, step, total, pct, preview_frame=preview_frame)
+
+    try:
+        result = await i2v_pipeline.generate(
+            prompt=req.prompt,
+            source_image_path=req.source_image_path,
+            width=req.width,
+            height=req.height,
+            num_frames=req.num_frames,
+            steps=req.steps,
+            seed=req.seed,
+            guidance_scale=req.guidance_scale,
+            fps=req.fps,
+            progress_callback=progress_cb,
+        )
+        jobs[job_id]["status"] = "completed"
+        jobs[job_id]["progress"] = 1.0
+        jobs[job_id]["result"] = {
+            "job_id": result.job_id,
+            "output_path": result.output_path,
+            "duration_seconds": result.duration_seconds,
+            "memory_after": result.memory_after,
+            "stages": result.stages,
+        }
+        await _broadcast_progress(job_id, 0, 0, 1.0, done=True)
+        log.info("I2V %s completed in %.2fs", job_id, result.duration_seconds)
+
+    except Exception as e:
+        jobs[job_id]["status"] = "failed"
+        jobs[job_id]["error"] = str(e)
+        log.error("I2V %s failed: %s", job_id, e)
         await _broadcast_progress(job_id, 0, 0, 0.0, error=str(e))
 
 
@@ -273,13 +393,14 @@ async def _broadcast_progress(
     pct: float,
     done: bool = False,
     error: str | None = None,
+    preview_frame: str | None = None,
 ) -> None:
     """Broadcast progress update to all WebSocket connections for a job."""
     if job_id not in ws_connections:
         return
 
     memory = get_memory_stats()
-    msg = {
+    msg: dict[str, Any] = {
         "job_id": job_id,
         "step": step,
         "total_steps": total_steps,
@@ -288,6 +409,9 @@ async def _broadcast_progress(
         "done": done,
         "error": error,
     }
+
+    if preview_frame is not None:
+        msg["preview_frame"] = preview_frame
 
     dead: list[WebSocket] = []
     for ws in ws_connections[job_id]:

@@ -1,4 +1,4 @@
-"""API Integration Tests — Sprint 1."""
+"""API Integration Tests — Sprint 2."""
 
 from __future__ import annotations
 
@@ -61,6 +61,59 @@ def test_generate_t2v(client: httpx.Client):
 
     assert status["status"] == "completed", f"Job failed: {status.get('error')}"
     assert status["result"]["output_path"].endswith(".mp4")
+
+    # Sprint 2: Verify TeaCache stats are present
+    stages = status["result"].get("stages", {})
+    assert "teacache_hit_rate" in stages, "TeaCache stats missing from result"
+
+
+def test_generate_preview(client: httpx.Client):
+    """POST /generate/preview produces a fast low-res video."""
+    t0 = time.monotonic()
+
+    r = client.post("/api/v1/generate/preview", json={
+        "prompt": "A quick preview test",
+        "seed": 42,
+    })
+    assert r.status_code == 200
+    job_id = r.json()["job_id"]
+
+    # Poll until complete (max 30s)
+    for _ in range(60):
+        status = client.get(f"/api/v1/queue/{job_id}").json()
+        if status["status"] in ("completed", "failed"):
+            break
+        time.sleep(0.5)
+
+    elapsed = time.monotonic() - t0
+
+    assert status["status"] == "completed", f"Preview failed: {status.get('error')}"
+    assert status["result"]["output_path"].endswith(".mp4")
+    # Preview should complete faster than a full T2V generation
+    assert elapsed < 10, f"Preview took too long: {elapsed:.2f}s"
+
+
+def test_generate_i2v_missing_image(client: httpx.Client):
+    """POST /generate/image-to-video with invalid image path should fail."""
+    r = client.post("/api/v1/generate/image-to-video", json={
+        "prompt": "A video from an image",
+        "source_image_path": "/nonexistent/image.png",
+        "width": 256,
+        "height": 256,
+        "num_frames": 9,
+        "steps": 2,
+    })
+    assert r.status_code == 200
+    job_id = r.json()["job_id"]
+
+    # Should fail because image doesn't exist
+    for _ in range(60):
+        status = client.get(f"/api/v1/queue/{job_id}").json()
+        if status["status"] in ("completed", "failed"):
+            break
+        time.sleep(0.5)
+
+    assert status["status"] == "failed"
 
 
 def test_queue_list(client: httpx.Client):
