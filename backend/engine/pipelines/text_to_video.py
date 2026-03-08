@@ -1,26 +1,18 @@
 """Text-to-Video generation pipeline.
 
-Sprint 1: stubbed inference that produces real MP4 files via ffmpeg.
-Sprint 2: progressive diffusion display (intermediate preview frames).
-Real MLX inference will replace the stubs in a later sprint.
+Uses MLX inference via mlx-video-with-audio subprocess for real video generation.
 """
 
 from __future__ import annotations
 
 import asyncio
-import base64
 import inspect
-import io
 import logging
-import shutil
-import subprocess
 import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
-
-from PIL import Image
+from typing import Awaitable, Callable
 
 from engine.memory_manager import (
     aggressive_cleanup,
@@ -29,8 +21,8 @@ from engine.memory_manager import (
     periodic_reload_check,
     reset_peak_memory,
 )
+from engine.mlx_runner import run_mlx_generation
 from engine.model_manager import ModelManager
-from engine.teacache import TeaCacheMLX, create_teacache
 
 log = logging.getLogger(__name__)
 
@@ -49,38 +41,12 @@ class GenerationResult:
     stages: dict[str, float] = field(default_factory=dict)
 
 
-def _generate_preview_frame(width: int, height: int, step: int, total_steps: int) -> str:
-    """Generate a stub preview frame as a base64-encoded JPEG.
-
-    Creates a solid-color image that transitions from dark to light as
-    denoising progresses, simulating the progressive diffusion display.
-
-    Args:
-        width: Frame width.
-        height: Frame height.
-        step: Current denoising step (0-indexed).
-        total_steps: Total number of denoising steps.
-
-    Returns:
-        Base64-encoded JPEG string.
-    """
-    progress = (step + 1) / total_steps
-    r = int(26 + progress * 60)
-    g = int(26 + progress * 80)
-    b = int(46 + progress * 120)
-    img = Image.new("RGB", (width, height), (r, g, b))
-
-    buf = io.BytesIO()
-    img.save(buf, format="JPEG", quality=60)
-    return base64.b64encode(buf.getvalue()).decode("ascii")
-
-
 class TextToVideoPipeline:
-    """Text-to-Video generation pipeline using MLX (stubbed for Sprint 1)."""
+    """Text-to-Video generation pipeline using MLX."""
 
     def __init__(self, model_manager: ModelManager, teacache_enabled: bool = True) -> None:
         self._model_manager = model_manager
-        self._teacache = create_teacache(enabled=teacache_enabled)
+        self._teacache_enabled = teacache_enabled
 
     async def generate(
         self,
@@ -129,82 +95,34 @@ class TextToVideoPipeline:
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         output_path = OUTPUT_DIR / f"{job_id}.mp4"
 
-        total_stages = 5
-        current_stage = 0
+        # Adapt mlx_runner progress to pipeline progress_callback format
+        async def _progress_adapter(
+            step: int, total_steps: int, stage: int, pct: float
+        ) -> None:
+            await _notify(step, total_steps, pct, None)
 
-        # Stage 1: Text encoding
-        log.info("[%s] Stage 1: Text encoding — prompt=%r", job_id, prompt[:80])
-        t0 = time.monotonic()
-        await asyncio.sleep(0.1)  # Stub: simulate text encoding
-        stages["text_encoding"] = time.monotonic() - t0
-        aggressive_cleanup()
-        current_stage += 1
-        await _notify(current_stage, total_stages, current_stage / total_stages)
-
-        # Stage 2: Diffusion (denoising loop) with progressive display + TeaCache
-        log.info("[%s] Stage 2: Diffusion — %d steps (TeaCache=%s)", job_id, steps, self._teacache.enabled)
-        self._teacache.reset()
-        t0 = time.monotonic()
-        for step in range(steps):
-            # Stub: simulate denoising step
-            # With TeaCache, some blocks are skipped (simulated by shorter sleep)
-            if self._teacache.enabled and step > 0:
-                await asyncio.sleep(0.025)  # ~50% faster with cache hits
-            else:
-                await asyncio.sleep(0.05)
-
-            # Simulate TeaCache block-level caching (stub)
-            for layer_idx in range(self._teacache.num_layers):
-                # In production: self._teacache.get_or_compute(block, x, t_emb, layer_idx)
-                self._teacache.should_recompute(None, layer_idx)
-            self._teacache.step_done(None)
-
-            # Generate preview frame every 4th step or on the last step
-            preview_frame = None
-            if (step + 1) % 4 == 0 or step == steps - 1:
-                preview_frame = _generate_preview_frame(width, height, step, steps)
-
-            pct = (current_stage + (step + 1) / steps) / total_stages
-            await _notify(step + 1, steps, pct, preview_frame)
-
-        tea_stats = self._teacache.get_stats()
-        stages["diffusion"] = time.monotonic() - t0
-        stages["teacache_hit_rate"] = tea_stats.cache_hit_rate
-        stages["teacache_speedup"] = tea_stats.estimated_speedup
+        # Run MLX inference (handles model loading, text encoding, denoising,
+        # VAE decode, audio decode, and ffmpeg muxing internally)
         log.info(
-            "[%s] TeaCache: hit_rate=%.1f%%, estimated_speedup=%.2fx",
-            job_id, tea_stats.cache_hit_rate * 100, tea_stats.estimated_speedup,
+            "[%s] Starting T2V generation: prompt=%r, %dx%d, %d frames, seed=%d",
+            job_id, prompt[:80], width, height, num_frames, seed,
         )
-        aggressive_cleanup()
-        current_stage += 1
-
-        # Stage 3: Upscale (optional, stubbed)
-        log.info("[%s] Stage 3: Upscale (skipped in stub)", job_id)
         t0 = time.monotonic()
-        await asyncio.sleep(0.05)
-        stages["upscale"] = time.monotonic() - t0
-        aggressive_cleanup()
-        current_stage += 1
-        await _notify(current_stage, total_stages, current_stage / total_stages)
 
-        # Stage 4: VAE decode + video encoding via ffmpeg
-        log.info("[%s] Stage 4: VAE decode → ffmpeg", job_id)
-        t0 = time.monotonic()
-        duration_secs = num_frames / fps
-        _generate_stub_video(output_path, width, height, duration_secs, fps)
-        stages["vae_decode"] = time.monotonic() - t0
-        aggressive_cleanup()
-        current_stage += 1
-        await _notify(current_stage, total_stages, current_stage / total_stages)
+        await run_mlx_generation(
+            prompt=prompt,
+            height=height,
+            width=width,
+            num_frames=num_frames,
+            seed=seed,
+            fps=fps,
+            output_path=str(output_path),
+            tiling="auto",
+            progress_callback=_progress_adapter,
+        )
 
-        # Stage 5: Audio decode
-        log.info("[%s] Stage 5: Audio decode (stub)", job_id)
-        t0 = time.monotonic()
-        await asyncio.sleep(0.05)
-        stages["audio_decode"] = time.monotonic() - t0
+        stages["generation"] = time.monotonic() - t0
         aggressive_cleanup()
-        current_stage += 1
-        await _notify(current_stage, total_stages, 1.0)
 
         total_duration = time.monotonic() - start_time
         log.info("[%s] Generation complete in %.2fs", job_id, total_duration)
@@ -219,45 +137,3 @@ class TextToVideoPipeline:
             memory_after=get_memory_stats(),
             stages=stages,
         )
-
-
-def _generate_stub_video(
-    output_path: Path, width: int, height: int, duration: float, fps: int
-) -> None:
-    """Generate a placeholder MP4 with solid color video and sine wave audio.
-
-    Args:
-        output_path: Where to write the MP4.
-        width: Video width.
-        height: Video height.
-        duration: Video duration in seconds.
-        fps: Frames per second.
-    """
-    ffmpeg_bin = shutil.which("ffmpeg")
-    if not ffmpeg_bin:
-        for p in ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"]:
-            if Path(p).exists():
-                ffmpeg_bin = p
-                break
-    if not ffmpeg_bin:
-        raise RuntimeError("ffmpeg not found. Install with: brew install ffmpeg")
-
-    cmd = [
-        ffmpeg_bin,
-        "-y",
-        "-f", "lavfi",
-        "-i", f"color=c=0x1a1a2e:s={width}x{height}:d={duration:.3f}:r={fps}",
-        "-f", "lavfi",
-        "-i", f"sine=frequency=440:duration={duration:.3f}:sample_rate=44100",
-        "-c:v", "libx264",
-        "-preset", "ultrafast",
-        "-pix_fmt", "yuv420p",
-        "-c:a", "aac",
-        "-b:a", "128k",
-        "-shortest",
-        str(output_path),
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-    if result.returncode != 0:
-        raise RuntimeError(f"ffmpeg failed: {result.stderr[:500]}")
-    log.info("Stub video created: %s", output_path)

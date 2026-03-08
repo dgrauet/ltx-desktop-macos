@@ -1,20 +1,17 @@
 """Image-to-Video (I2V) generation pipeline.
 
 Takes a reference image that conditions the first frame of the generated video.
-Sprint 2: stubbed inference with ffmpeg placeholder videos.
+Uses MLX inference via mlx-video-with-audio subprocess.
 """
 
 from __future__ import annotations
 
-import asyncio
 import inspect
 import logging
-import shutil
-import subprocess
 import time
 import uuid
 from pathlib import Path
-from typing import Callable
+from typing import Awaitable, Callable
 
 from engine.memory_manager import (
     aggressive_cleanup,
@@ -23,8 +20,9 @@ from engine.memory_manager import (
     periodic_reload_check,
     reset_peak_memory,
 )
+from engine.mlx_runner import run_mlx_generation
 from engine.model_manager import ModelManager
-from engine.pipelines.text_to_video import GenerationResult, _generate_preview_frame
+from engine.pipelines.text_to_video import GenerationResult
 
 log = logging.getLogger(__name__)
 
@@ -32,7 +30,7 @@ OUTPUT_DIR = Path.home() / ".ltx-desktop" / "outputs"
 
 
 class ImageToVideoPipeline:
-    """Image-to-Video generation pipeline using MLX (stubbed for Sprint 2)."""
+    """Image-to-Video generation pipeline using MLX."""
 
     def __init__(self, model_manager: ModelManager) -> None:
         self._model_manager = model_manager
@@ -76,7 +74,9 @@ class ImageToVideoPipeline:
         stages: dict[str, float] = {}
         start_time = time.monotonic()
 
-        async def _notify(step: int, total: int, pct: float, frame: str | None = None) -> None:
+        async def _notify(
+            step: int, total: int, pct: float, frame: str | None = None
+        ) -> None:
             if not progress_callback:
                 return
             result = progress_callback(step, total, pct, frame)
@@ -89,59 +89,34 @@ class ImageToVideoPipeline:
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         output_path = OUTPUT_DIR / f"i2v_{job_id}.mp4"
 
-        total_stages = 5
-        current_stage = 0
+        # Adapt mlx_runner progress to pipeline progress_callback format
+        async def _progress_adapter(
+            step: int, total_steps: int, stage: int, pct: float
+        ) -> None:
+            await _notify(step, total_steps, pct, None)
 
-        # Stage 1: Image encoding + Text encoding
-        log.info("[%s] I2V Stage 1: Image+Text encoding — image=%s", job_id, source_image_path)
+        # Run MLX inference with source image conditioning
+        log.info(
+            "[%s] Starting I2V generation: prompt=%r, image=%s, %dx%d, %d frames",
+            job_id, prompt[:80], source_image_path, width, height, num_frames,
+        )
         t0 = time.monotonic()
-        await asyncio.sleep(0.1)  # Stub: simulate encoding
-        stages["image_text_encoding"] = time.monotonic() - t0
-        aggressive_cleanup()
-        current_stage += 1
-        await _notify(current_stage, total_stages, current_stage / total_stages)
 
-        # Stage 2: Diffusion (image-conditioned denoising loop)
-        log.info("[%s] I2V Stage 2: Diffusion — %d steps (image-conditioned)", job_id, steps)
-        t0 = time.monotonic()
-        for step in range(steps):
-            await asyncio.sleep(0.05)  # Stub: simulate denoising step
-            preview_frame = None
-            if (step + 1) % 4 == 0 or step == steps - 1:
-                preview_frame = _generate_preview_frame(width, height, step, steps)
-            pct = (current_stage + (step + 1) / steps) / total_stages
-            await _notify(step + 1, steps, pct, preview_frame)
-        stages["diffusion"] = time.monotonic() - t0
-        aggressive_cleanup()
-        current_stage += 1
+        await run_mlx_generation(
+            prompt=prompt,
+            height=height,
+            width=width,
+            num_frames=num_frames,
+            seed=seed,
+            fps=fps,
+            output_path=str(output_path),
+            image=source_image_path,
+            tiling="auto",
+            progress_callback=_progress_adapter,
+        )
 
-        # Stage 3: Upscale
-        log.info("[%s] I2V Stage 3: Upscale (skipped in stub)", job_id)
-        t0 = time.monotonic()
-        await asyncio.sleep(0.05)
-        stages["upscale"] = time.monotonic() - t0
+        stages["generation"] = time.monotonic() - t0
         aggressive_cleanup()
-        current_stage += 1
-        await _notify(current_stage, total_stages, current_stage / total_stages)
-
-        # Stage 4: VAE decode + video encoding
-        log.info("[%s] I2V Stage 4: VAE decode → ffmpeg", job_id)
-        t0 = time.monotonic()
-        duration_secs = num_frames / fps
-        _generate_stub_video(output_path, width, height, duration_secs, fps)
-        stages["vae_decode"] = time.monotonic() - t0
-        aggressive_cleanup()
-        current_stage += 1
-        await _notify(current_stage, total_stages, current_stage / total_stages)
-
-        # Stage 5: Audio decode
-        log.info("[%s] I2V Stage 5: Audio decode (stub)", job_id)
-        t0 = time.monotonic()
-        await asyncio.sleep(0.05)
-        stages["audio_decode"] = time.monotonic() - t0
-        aggressive_cleanup()
-        current_stage += 1
-        await _notify(current_stage, total_stages, 1.0)
 
         total_duration = time.monotonic() - start_time
         log.info("[%s] I2V generation complete in %.2fs", job_id, total_duration)
@@ -156,36 +131,3 @@ class ImageToVideoPipeline:
             memory_after=get_memory_stats(),
             stages=stages,
         )
-
-
-def _generate_stub_video(
-    output_path: Path, width: int, height: int, duration: float, fps: int
-) -> None:
-    """Generate a placeholder MP4 (purple tint to distinguish from T2V)."""
-    ffmpeg_bin = shutil.which("ffmpeg")
-    if not ffmpeg_bin:
-        for p in ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"]:
-            if Path(p).exists():
-                ffmpeg_bin = p
-                break
-    if not ffmpeg_bin:
-        raise RuntimeError("ffmpeg not found. Install with: brew install ffmpeg")
-
-    cmd = [
-        ffmpeg_bin, "-y",
-        "-f", "lavfi",
-        "-i", f"color=c=0x2e1a2e:s={width}x{height}:d={duration:.3f}:r={fps}",
-        "-f", "lavfi",
-        "-i", f"sine=frequency=330:duration={duration:.3f}:sample_rate=44100",
-        "-c:v", "libx264",
-        "-preset", "ultrafast",
-        "-pix_fmt", "yuv420p",
-        "-c:a", "aac",
-        "-b:a", "128k",
-        "-shortest",
-        str(output_path),
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-    if result.returncode != 0:
-        raise RuntimeError(f"ffmpeg failed: {result.stderr[:500]}")
-    log.info("I2V stub video created: %s", output_path)
