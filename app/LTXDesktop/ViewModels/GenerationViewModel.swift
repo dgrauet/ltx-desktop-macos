@@ -18,6 +18,7 @@ class GenerationViewModel: ObservableObject {
     @Published var sourceImagePath: String?
     @Published var sourceImageData: Data?
     @Published var isEnhancing: Bool = false
+    @Published var imageStrength: Double = 0.85
 
     enum Resolution: String, CaseIterable, Identifiable {
         case landscape768 = "768x512"
@@ -74,7 +75,8 @@ class GenerationViewModel: ObservableObject {
                     numFrames: numFrames,
                     steps: steps,
                     seed: seed,
-                    fps: fps
+                    fps: fps,
+                    imageStrength: imageStrength
                 )
                 jobResponse = try await service.generateImageToVideo(request: request)
             } else {
@@ -137,7 +139,8 @@ class GenerationViewModel: ObservableObject {
         let request = PreviewRequest(
             prompt: prompt,
             seed: seed,
-            sourceImagePath: sourceImagePath
+            sourceImagePath: sourceImagePath,
+            imageStrength: imageStrength
         )
 
         do {

@@ -108,6 +108,7 @@ class I2VRequest(BaseModel):
     seed: int = Field(default=42)
     guidance_scale: float = Field(default=1.0, ge=0.0, le=20.0)
     fps: int = Field(default=24, ge=1, le=60)
+    image_strength: float = Field(default=0.85, ge=0.0, le=1.0)
 
 
 class EnhanceRequest(BaseModel):
@@ -420,6 +421,7 @@ async def _run_i2v(job_id: str, req: I2VRequest) -> None:
             seed=req.seed,
             guidance_scale=req.guidance_scale,
             fps=req.fps,
+            image_strength=req.image_strength,
             progress_callback=progress_cb,
         )
         jobs[job_id]["status"] = "completed"

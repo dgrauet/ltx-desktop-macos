@@ -151,6 +151,25 @@ struct GenerationView: View {
                         .textFieldStyle(.roundedBorder)
                 }
 
+                // Image Strength (only when I2V)
+                if vm.sourceImagePath != nil {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("Image Strength")
+                                .font(.subheadline)
+                            Spacer()
+                            Text(String(format: "%.0f%%", vm.imageStrength * 100))
+                                .font(.subheadline)
+                                .monospacedDigit()
+                                .foregroundStyle(.secondary)
+                        }
+                        Slider(value: $vm.imageStrength, in: 0.5...1.0, step: 0.05)
+                        Text("Lower = more motion freedom, higher = closer to source image")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
                 Divider()
 
                 // Generate + Preview buttons

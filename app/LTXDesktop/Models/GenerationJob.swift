@@ -41,12 +41,14 @@ struct I2VRequest: Codable {
     var seed: Int = 42
     var guidanceScale: Double = 1.0
     var fps: Int = 24
+    var imageStrength: Double = 0.85
 
     enum CodingKeys: String, CodingKey {
         case prompt, width, height, steps, seed, fps
         case sourceImagePath = "source_image_path"
         case numFrames = "num_frames"
         case guidanceScale = "guidance_scale"
+        case imageStrength = "image_strength"
     }
 }
 

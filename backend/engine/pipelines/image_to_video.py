@@ -46,6 +46,7 @@ class ImageToVideoPipeline:
         seed: int = 42,
         guidance_scale: float = 1.0,
         fps: int = 24,
+        image_strength: float = 0.85,
         progress_callback: Callable[[int, int, float, str | None], None] | None = None,
     ) -> GenerationResult:
         """Run the I2V generation pipeline.
@@ -111,6 +112,7 @@ class ImageToVideoPipeline:
             fps=fps,
             output_path=str(output_path),
             image=source_image_path,
+            image_strength=image_strength,
             tiling="auto",
             progress_callback=_progress_adapter,
         )
