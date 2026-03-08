@@ -27,6 +27,7 @@ struct GenerationView: View {
                 player = nil
             }
         }
+    }
 
     // MARK: - Controls Panel
 
