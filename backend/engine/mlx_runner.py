@@ -53,9 +53,10 @@ def get_model_repo() -> tuple[str, bool]:
         Tuple of (model_repo_or_path, is_quantized).
     """
     for qpath in _QUANTIZED_PATHS:
-        model_file = qpath / "model.safetensors"
         config_file = qpath / "config.json"
-        if model_file.exists() and config_file.exists():
+        # Check for either monolithic or split model files
+        has_model = (qpath / "model.safetensors").exists() or (qpath / "transformer.safetensors").exists()
+        if has_model and config_file.exists():
             quantized = _is_quantized_model(qpath)
             log.info("Using %s model: %s", "quantized" if quantized else "local", qpath)
             return str(qpath), quantized
@@ -83,6 +84,26 @@ def get_venv_python() -> str:
         f"Venv Python not found at {venv_python}. "
         f"Run 'uv sync' in {backend_dir} to create the virtual environment."
     )
+
+
+def _get_text_encoder_4bit() -> str | None:
+    """Return the path to a 4-bit text encoder if available.
+
+    On 32GB machines, the bf16 Gemma 3 12B (~24GB) is too large.
+    Uses the 4-bit version (~6GB) instead.
+    """
+    # Check for locally cached 4-bit text encoder
+    cache_root = Path.home() / ".cache" / "huggingface" / "hub"
+    model_dir = cache_root / "models--mlx-community--gemma-3-12b-it-4bit"
+    if model_dir.exists():
+        snapshots = model_dir / "snapshots"
+        if snapshots.exists():
+            for d in sorted(snapshots.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+                if (d / "config.json").exists():
+                    log.info("Using 4-bit text encoder: %s", d)
+                    return str(d)
+    # Fallback: use the HF repo ID (will download on first use)
+    return "mlx-community/gemma-3-12b-it-4bit"
 
 
 def _compute_progress(stage: int, step: int, total: int) -> float:
@@ -169,6 +190,11 @@ async def run_mlx_generation(
         "--model-repo", model_repo,
         "--tiling", tiling,
     ]
+
+    # Use 4-bit text encoder on memory-constrained machines
+    text_encoder_4bit = _get_text_encoder_4bit()
+    if text_encoder_4bit:
+        cmd.extend(["--text-encoder-repo", text_encoder_4bit])
 
     if image is not None:
         cmd.extend(["--image", image, "--image-strength", str(image_strength)])
