@@ -93,6 +93,8 @@ class PreviewRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=2000)
     seed: int = Field(default=42)
     fps: int = Field(default=24, ge=1, le=60)
+    source_image_path: str | None = Field(default=None)
+    image_strength: float = Field(default=1.0, ge=0.0, le=1.0)
 
 
 class I2VRequest(BaseModel):
@@ -375,6 +377,8 @@ async def _run_preview(job_id: str, req: PreviewRequest) -> None:
             prompt=req.prompt,
             seed=req.seed,
             fps=req.fps,
+            image=req.source_image_path,
+            image_strength=req.image_strength,
             progress_callback=progress_cb,
         )
         jobs[job_id]["status"] = "completed"

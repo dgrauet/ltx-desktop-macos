@@ -21,6 +21,14 @@ struct PreviewRequest: Codable {
     var prompt: String
     var seed: Int = 42
     var fps: Int = 24
+    var sourceImagePath: String?
+    var imageStrength: Double = 1.0
+
+    enum CodingKeys: String, CodingKey {
+        case prompt, seed, fps
+        case sourceImagePath = "source_image_path"
+        case imageStrength = "image_strength"
+    }
 }
 
 struct I2VRequest: Codable {

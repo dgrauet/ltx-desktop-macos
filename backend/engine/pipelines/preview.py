@@ -44,6 +44,8 @@ class PreviewPipeline:
         seed: int = 42,
         fps: int = 24,
         num_frames: int = 9,
+        image: str | None = None,
+        image_strength: float = 1.0,
         progress_callback: Callable[[int, int, float, str | None], None] | None = None,
     ) -> GenerationResult:
         """Run the rapid preview pipeline.
@@ -53,6 +55,8 @@ class PreviewPipeline:
             seed: Random seed for reproducibility.
             fps: Output frames per second.
             num_frames: Number of frames (default 9 for fast preview).
+            image: Optional path to source image for I2V preview.
+            image_strength: Strength of image conditioning (0.0-1.0).
             progress_callback: Optional callback(step, total_steps, pct, preview_frame).
 
         Returns:
@@ -84,7 +88,8 @@ class PreviewPipeline:
             await _notify(step, total_steps, pct, None)
 
         # Run MLX inference with preview settings (small resolution, few frames)
-        log.info("[%s] Starting preview generation: prompt=%r", job_id, prompt[:80])
+        mode = "I2V" if image else "T2V"
+        log.info("[%s] Starting %s preview generation: prompt=%r", job_id, mode, prompt[:80])
         t0 = time.monotonic()
 
         await run_mlx_generation(
@@ -95,6 +100,8 @@ class PreviewPipeline:
             seed=seed,
             fps=fps,
             output_path=str(output_path),
+            image=image,
+            image_strength=image_strength,
             tiling="aggressive",
             progress_callback=_progress_adapter,
         )

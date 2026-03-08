@@ -134,7 +134,11 @@ class GenerationViewModel: ObservableObject {
         outputVideoURL = nil
         progressiveFrame = nil
 
-        let request = PreviewRequest(prompt: prompt, seed: seed)
+        let request = PreviewRequest(
+            prompt: prompt,
+            seed: seed,
+            sourceImagePath: sourceImagePath
+        )
 
         do {
             let jobResponse = try await service.generatePreview(request: request)
