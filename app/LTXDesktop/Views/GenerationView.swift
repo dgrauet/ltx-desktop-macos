@@ -51,6 +51,14 @@ struct GenerationView: View {
                             .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
                     )
 
+                // I2V hint
+                if vm.sourceImagePath != nil {
+                    Text("Describe what's in the image and the motion you want. The prompt should match the image content.")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 4)
+                }
+
                 // Word count + Enhance button
                 HStack(alignment: .center) {
                     Spacer()

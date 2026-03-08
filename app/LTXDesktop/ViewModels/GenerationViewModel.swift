@@ -178,7 +178,7 @@ class GenerationViewModel: ObservableObject {
         isEnhancing = true
         errorMessage = nil
         do {
-            let response = try await service.enhancePrompt(prompt: prompt)
+            let response = try await service.enhancePrompt(prompt: prompt, isI2V: sourceImagePath != nil)
             prompt = response.enhanced
         } catch {
             errorMessage = "Enhance failed: \(error.localizedDescription)"

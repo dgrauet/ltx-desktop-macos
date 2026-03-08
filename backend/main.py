@@ -113,6 +113,7 @@ class I2VRequest(BaseModel):
 class EnhanceRequest(BaseModel):
     """Prompt enhancement request."""
     prompt: str = Field(..., min_length=1, max_length=2000)
+    is_i2v: bool = Field(default=False)
 
 
 class EnhanceResponse(BaseModel):
@@ -551,7 +552,7 @@ async def enhance_prompt(req: EnhanceRequest):
 
     try:
         result = await asyncio.get_event_loop().run_in_executor(
-            None, prompt_enhancer.enhance, req.prompt
+            None, prompt_enhancer.enhance, req.prompt, req.is_i2v
         )
     except Exception as exc:
         raise HTTPException(

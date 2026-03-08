@@ -13,8 +13,8 @@ from engine.memory_manager import aggressive_cleanup
 
 log = logging.getLogger(__name__)
 
-# System prompt that rewrites short prompts into detailed LTX-2.3 optimised prompts.
-_SYSTEM_PROMPT = (
+# System prompt for text-to-video enhancement.
+_SYSTEM_PROMPT_T2V = (
     "You are a prompt enhancer for AI video generation with LTX-2.3. "
     "Rewrite the user's short description into a single detailed, cinematic paragraph. "
     "Include: (1) main subject — appearance, clothing, expressions; "
@@ -24,6 +24,23 @@ _SYSTEM_PROMPT = (
     "(5) visual style — cinematic, realistic, animation, colour grading; "
     "(6) audio elements — ambient sounds, music, any dialogue in quotes. "
     "Start directly with the action. Do not use bullet points or headers. "
+    "Keep the response under 200 words. Output ONLY the enhanced prompt, nothing else."
+)
+
+# System prompt for image-to-video enhancement.
+_SYSTEM_PROMPT_I2V = (
+    "You are a prompt enhancer for AI Image-to-Video generation with LTX-2.3. "
+    "The user has provided a source image that will be the first frame of the video. "
+    "Your enhanced prompt MUST describe what is visible in the image first, "
+    "then describe the desired motion and animation starting from that image. "
+    "CRITICAL: Do NOT describe a scene that contradicts or differs from the source image. "
+    "The prompt should feel like a continuation of what's already shown. "
+    "Include: (1) describe the scene as it appears in the image (subject, setting, lighting); "
+    "(2) specific motions and actions that naturally follow from the image; "
+    "(3) camera movement (pan, dolly, static, tracking); "
+    "(4) audio elements — ambient sounds, music. "
+    "Start directly with a description of the scene, then the motion. "
+    "Do not use bullet points or headers. "
     "Keep the response under 200 words. Output ONLY the enhanced prompt, nothing else."
 )
 
@@ -51,11 +68,13 @@ class PromptEnhancer:
         except ImportError:
             return False
 
-    def enhance(self, prompt: str) -> str:
+    def enhance(self, prompt: str, is_i2v: bool = False) -> str:
         """Load Qwen3.5-2B, enhance the prompt, then unload immediately.
 
         Args:
             prompt: Short user-supplied video description.
+            is_i2v: If True, use I2V-specific system prompt that instructs
+                the enhancer to describe the source image first, then motion.
 
         Returns:
             Detailed, LTX-2.3-optimised prompt string.
@@ -72,13 +91,16 @@ class PromptEnhancer:
         # mlx-lm is absent — the classmethod is_available() guards this path.
         from mlx_lm import generate, load  # type: ignore[import-untyped]
 
-        log.info("PromptEnhancer: loading %s", self.MODEL_ID)
+        system_prompt = _SYSTEM_PROMPT_I2V if is_i2v else _SYSTEM_PROMPT_T2V
+        mode = "I2V" if is_i2v else "T2V"
+
+        log.info("PromptEnhancer: loading %s (mode=%s)", self.MODEL_ID, mode)
         model, tokenizer = load(self.MODEL_ID)
         log.info("PromptEnhancer: model loaded — enhancing prompt")
 
         # Build the chat-formatted prompt expected by Qwen instruction models.
         messages = [
-            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt},
         ]
         formatted: str

@@ -46,9 +46,12 @@ class BackendService: ObservableObject {
 
     // MARK: - Prompt Enhancement
 
-    func enhancePrompt(prompt: String) async throws -> EnhanceResponse {
-        struct Body: Encodable { let prompt: String }
-        return try await post("/api/v1/prompt/enhance", body: Body(prompt: prompt))
+    func enhancePrompt(prompt: String, isI2V: Bool = false) async throws -> EnhanceResponse {
+        struct Body: Encodable {
+            let prompt: String
+            let is_i2v: Bool
+        }
+        return try await post("/api/v1/prompt/enhance", body: Body(prompt: prompt, is_i2v: isI2V))
     }
 
     // MARK: - Retake & Extend
