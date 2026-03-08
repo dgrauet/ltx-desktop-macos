@@ -6,6 +6,7 @@ struct GenerationView: View {
     @EnvironmentObject var backendService: BackendService
     @StateObject private var vm = GenerationViewModel()
     @AppStorage("promptEnhanceEnabled") private var enhanceEnabled: Bool = true
+    @State private var player: AVPlayer?
 
     var body: some View {
         HSplitView {
@@ -18,7 +19,14 @@ struct GenerationView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .padding()
-    }
+        .onChange(of: vm.outputVideoURL) { _, newURL in
+            if let url = newURL {
+                player = AVPlayer(url: url)
+                player?.play()
+            } else {
+                player = nil
+            }
+        }
 
     // MARK: - Controls Panel
 
@@ -270,8 +278,8 @@ struct GenerationView: View {
 
     private var previewPanel: some View {
         Group {
-            if let videoURL = vm.outputVideoURL {
-                VideoPlayer(player: AVPlayer(url: videoURL))
+            if let player = player {
+                VideoPlayer(player: player)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
             } else if vm.isGenerating, let frame = vm.progressiveFrame {
                 // Progressive diffusion display during generation
