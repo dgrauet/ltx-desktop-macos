@@ -17,6 +17,15 @@ from engine.memory_manager import aggressive_cleanup
 
 log = logging.getLogger(__name__)
 
+# Default model repo — overridden if a local quantized model is detected
+DEFAULT_MODEL_REPO = "notapalindrome/ltx2-mlx-av"
+
+# Quantized model paths (checked in priority order)
+_QUANTIZED_PATHS = [
+    Path.home() / ".cache/huggingface/hub/ltx2-mlx-av-int4",
+    Path.home() / ".cache/huggingface/hub/ltx2-mlx-av-int8",
+]
+
 # Regex patterns for stderr progress lines
 _STAGE_RE = re.compile(r"^STAGE:(\d+):STEP:(\d+):(\d+)")
 _STATUS_RE = re.compile(r"^STATUS:(.+)")
@@ -26,6 +35,32 @@ _STAGE_RANGES: dict[int, tuple[float, float]] = {
     1: (0.05, 0.50),  # Stage 1 denoising
     2: (0.50, 0.85),  # Stage 2 denoising
 }
+
+
+def _is_quantized_model(model_path: Path) -> bool:
+    """Check if a model directory contains quantized weights."""
+    qconfig = model_path / "quantize_config.json"
+    return qconfig.exists()
+
+
+def get_model_repo() -> tuple[str, bool]:
+    """Return the best available model and whether it's quantized.
+
+    Checks for local quantized models (int4 first, then int8). If found,
+    returns the local directory path. Otherwise returns the default HF repo ID.
+
+    Returns:
+        Tuple of (model_repo_or_path, is_quantized).
+    """
+    for qpath in _QUANTIZED_PATHS:
+        model_file = qpath / "model.safetensors"
+        config_file = qpath / "config.json"
+        if model_file.exists() and config_file.exists():
+            quantized = _is_quantized_model(qpath)
+            log.info("Using %s model: %s", "quantized" if quantized else "local", qpath)
+            return str(qpath), quantized
+    log.info("Using default model: %s", DEFAULT_MODEL_REPO)
+    return DEFAULT_MODEL_REPO, False
 
 
 def get_venv_python() -> str:
@@ -112,10 +147,18 @@ async def run_mlx_generation(
         FileNotFoundError: If the venv Python binary cannot be found.
     """
     python_bin = venv_python or get_venv_python()
+    model_repo, is_quantized = get_model_repo()
+
+    # Use quantized wrapper module for quantized models, otherwise standard mlx_video
+    if is_quantized:
+        module = "engine.generate_av_quantized"
+        log.info("Using quantized inference wrapper")
+    else:
+        module = "mlx_video.generate_av"
 
     cmd = [
         python_bin,
-        "-m", "mlx_video.generate_av",
+        "-m", module,
         "--prompt", prompt,
         "--height", str(height),
         "--width", str(width),
@@ -123,7 +166,7 @@ async def run_mlx_generation(
         "--seed", str(seed),
         "--fps", str(fps),
         "--output-path", output_path,
-        "--model-repo", "notapalindrome/ltx2-mlx-av",
+        "--model-repo", model_repo,
         "--tiling", tiling,
     ]
 
@@ -136,10 +179,14 @@ async def run_mlx_generation(
     # Ensure output directory exists
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
+    # Run from backend/ directory so engine.* imports work for quantized wrapper
+    backend_dir = str(Path(__file__).resolve().parent.parent)
+
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        cwd=backend_dir,
     )
 
     stderr_lines: list[str] = []
