@@ -145,7 +145,7 @@ struct ExportSheet: View {
                                     }
                                     .buttonStyle(.plain)
                                     .font(.caption)
-                                    .foregroundStyle(.accentColor)
+                                    .foregroundStyle(Color.accentColor)
                                 }
                                 .padding(8)
                                 .background(Color.green.opacity(0.1))

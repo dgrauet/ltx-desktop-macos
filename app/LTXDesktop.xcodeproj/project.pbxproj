@@ -19,6 +19,16 @@
 		A100000007 /* GenerationJob.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000007 /* GenerationJob.swift */; };
 		A100000008 /* MemoryStats.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000008 /* MemoryStats.swift */; };
 		A100000009 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A200000009 /* Assets.xcassets */; };
+		A10000000B /* ExportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000B /* ExportSheet.swift */; };
+		A10000000C /* HistoryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000C /* HistoryViewModel.swift */; };
+		A10000000D /* LoRAViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000D /* LoRAViewModel.swift */; };
+		A10000000E /* MemoryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000E /* MemoryViewModel.swift */; };
+		A10000000F /* VideoItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000F /* VideoItem.swift */; };
+		A100000010 /* ModelInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000010 /* ModelInfo.swift */; };
+		A100000011 /* EnhanceResponse.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000011 /* EnhanceResponse.swift */; };
+		A100000012 /* GenerationRequests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000012 /* GenerationRequests.swift */; };
+		A100000013 /* LoRAInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000013 /* LoRAInfo.swift */; };
+		A100000014 /* ExportRequests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000014 /* ExportRequests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -35,6 +45,16 @@
 		A200000008 /* MemoryStats.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryStats.swift; sourceTree = "<group>"; };
 		A200000009 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A20000000A /* LTXDesktop.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LTXDesktop.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A20000000B /* ExportSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportSheet.swift; sourceTree = "<group>"; };
+		A20000000C /* HistoryViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryViewModel.swift; sourceTree = "<group>"; };
+		A20000000D /* LoRAViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoRAViewModel.swift; sourceTree = "<group>"; };
+		A20000000E /* MemoryViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryViewModel.swift; sourceTree = "<group>"; };
+		A20000000F /* VideoItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoItem.swift; sourceTree = "<group>"; };
+		A200000010 /* ModelInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelInfo.swift; sourceTree = "<group>"; };
+		A200000011 /* EnhanceResponse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnhanceResponse.swift; sourceTree = "<group>"; };
+		A200000012 /* GenerationRequests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerationRequests.swift; sourceTree = "<group>"; };
+		A200000013 /* LoRAInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoRAInfo.swift; sourceTree = "<group>"; };
+		A200000014 /* ExportRequests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportRequests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -77,6 +97,7 @@
 				0AAC86212F5C6215008A3AFC /* HistoryView.swift */,
 				0AAC86232F5C6215008A3AFC /* LoRAView.swift */,
 				0AAC86252F5C6216008A3AFC /* SettingsView.swift */,
+				A20000000B /* ExportSheet.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -85,6 +106,9 @@
 			isa = PBXGroup;
 			children = (
 				A200000006 /* GenerationViewModel.swift */,
+				A20000000C /* HistoryViewModel.swift */,
+				A20000000D /* LoRAViewModel.swift */,
+				A20000000E /* MemoryViewModel.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -94,6 +118,12 @@
 			children = (
 				A200000007 /* GenerationJob.swift */,
 				A200000008 /* MemoryStats.swift */,
+				A20000000F /* VideoItem.swift */,
+				A200000010 /* ModelInfo.swift */,
+				A200000011 /* EnhanceResponse.swift */,
+				A200000012 /* GenerationRequests.swift */,
+				A200000013 /* LoRAInfo.swift */,
+				A200000014 /* ExportRequests.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -151,7 +181,7 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 1600;
-				LastUpgradeCheck = 1600;
+				LastUpgradeCheck = 2630;
 				TargetAttributes = {
 					A500000001 = {
 						CreatedOnToolsVersion = 16.0;
@@ -203,6 +233,16 @@
 				0AAC86222F5C6215008A3AFC /* HistoryView.swift in Sources */,
 				A100000008 /* MemoryStats.swift in Sources */,
 				0AAC86262F5C6216008A3AFC /* SettingsView.swift in Sources */,
+				A10000000B /* ExportSheet.swift in Sources */,
+				A10000000C /* HistoryViewModel.swift in Sources */,
+				A10000000D /* LoRAViewModel.swift in Sources */,
+				A10000000E /* MemoryViewModel.swift in Sources */,
+				A10000000F /* VideoItem.swift in Sources */,
+				A100000010 /* ModelInfo.swift in Sources */,
+				A100000011 /* EnhanceResponse.swift in Sources */,
+				A100000012 /* GenerationRequests.swift in Sources */,
+				A100000013 /* LoRAInfo.swift in Sources */,
+				A100000014 /* ExportRequests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -218,22 +258,48 @@
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_OPTIMIZATION_LEVEL = 0;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"DEBUG=1",
 					"$(inherited)",
 				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
 				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
@@ -248,14 +314,40 @@
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
 				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 			};
 			name = Release;
@@ -269,6 +361,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_HARDENED_RUNTIME = NO;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -291,6 +384,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_HARDENED_RUNTIME = NO;
 				GENERATE_INFOPLIST_FILE = YES;

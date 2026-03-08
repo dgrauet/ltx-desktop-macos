@@ -108,11 +108,13 @@ class BackendService: ObservableObject {
         return try await get("/api/v1/loras")
     }
 
+    @discardableResult
     func loadLoRA(loraId: String) async throws -> SuccessResponse {
         struct Body: Encodable { let lora_id: String }
         return try await post("/api/v1/loras/load", body: Body(lora_id: loraId))
     }
 
+    @discardableResult
     func unloadLoRA(loraId: String) async throws -> SuccessResponse {
         return try await post("/api/v1/loras/unload/\(loraId)", body: EmptyBody())
     }
@@ -133,7 +135,9 @@ class BackendService: ObservableObject {
         let url = URL(string: "\(baseURL)\(path)")!
         let (data, response) = try await session.data(from: url)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw BackendError.requestFailed
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let body = String(data: data, encoding: .utf8) ?? "(no body)"
+            throw BackendError.requestFailed(code, body)
         }
         return try decoder.decode(T.self, from: data)
     }
@@ -146,7 +150,9 @@ class BackendService: ObservableObject {
         request.httpBody = try JSONEncoder().encode(body)
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-            throw BackendError.requestFailed
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let body = String(data: data, encoding: .utf8) ?? "(no body)"
+            throw BackendError.requestFailed(code, body)
         }
         return try decoder.decode(T.self, from: data)
     }
@@ -158,11 +164,11 @@ struct SuccessResponse: Decodable {
 }
 
 enum BackendError: LocalizedError {
-    case requestFailed
+    case requestFailed(Int, String)
 
     var errorDescription: String? {
         switch self {
-        case .requestFailed: return "Backend request failed"
+        case .requestFailed(let code, let body): return "HTTP \(code): \(body)"
         }
     }
 }
