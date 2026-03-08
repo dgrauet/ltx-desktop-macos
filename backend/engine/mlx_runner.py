@@ -246,6 +246,14 @@ async def run_mlx_generation(
     if proc.returncode != 0:
         stderr_text = "\n".join(stderr_lines[-50:])  # Last 50 lines for context
         log.error("MLX generation failed (exit code %d): %s", proc.returncode, stderr_text)
+
+        # Detect Metal GPU out-of-memory crash (exit code -6 = SIGABRT from Metal)
+        if proc.returncode == -6 and "Command buffer execution failed" in stderr_text:
+            raise RuntimeError(
+                "Not enough GPU memory. Close other apps (including Xcode) and try again, "
+                "or use a lower resolution / fewer frames."
+            )
+
         raise RuntimeError(
             f"MLX generation failed with exit code {proc.returncode}:\n{stderr_text}"
         )

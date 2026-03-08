@@ -95,7 +95,7 @@ class PreviewPipeline:
             seed=seed,
             fps=fps,
             output_path=str(output_path),
-            tiling="none",
+            tiling="aggressive",
             progress_callback=_progress_adapter,
         )
 
