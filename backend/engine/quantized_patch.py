@@ -26,6 +26,7 @@ log = logging.getLogger(__name__)
 
 _original_load_weights = None
 _original_load_unified = None
+_quantize_config: dict | None = None  # Set by apply_patch from quantize_config.json
 
 # Map weight prefix → split filename
 _PREFIX_TO_FILE = {
@@ -47,7 +48,20 @@ def _patched_load_unified(model_path: Path, prefix: str) -> dict:
     """Load weights from the correct split file instead of model.safetensors.
 
     Falls back to the original monolithic loading if split files don't exist.
+    Also loads quantize_config.json on first call to configure bit width.
     """
+    global _quantize_config
+    if _quantize_config is None:
+        config_path = model_path / "quantize_config.json"
+        if config_path.exists():
+            import json
+            with open(config_path) as f:
+                raw = json.load(f)
+            _quantize_config = raw.get("quantization", {})
+            log.info("Loaded quantize config: bits=%d, group_size=%d",
+                     _quantize_config.get("bits", 0),
+                     _quantize_config.get("group_size", 0))
+
     split_file = _PREFIX_TO_FILE.get(prefix)
     if split_file:
         split_path = model_path / split_file
@@ -70,10 +84,19 @@ def _patched_load_unified(model_path: Path, prefix: str) -> dict:
 # ---------------------------------------------------------------------------
 
 def _has_quantized_weights(weight_items: list[tuple[str, mx.array]]) -> dict | None:
-    """Check if weight list contains quantized keys (.scales/.biases)."""
+    """Check if weight list contains quantized keys (.scales/.biases).
+
+    Returns quantization config dict or None. Reads bits/group_size from
+    the module-level _quantize_config (loaded from quantize_config.json).
+    """
     has_scales = any(k.endswith(".scales") for k, _ in weight_items)
     has_biases = any(k.endswith(".biases") for k, _ in weight_items)
     if has_scales and has_biases:
+        if _quantize_config:
+            return {
+                "bits": _quantize_config.get("bits", 4),
+                "group_size": _quantize_config.get("group_size", 64),
+            }
         return {"bits": 4, "group_size": 64}
     return None
 
@@ -81,36 +104,36 @@ def _has_quantized_weights(weight_items: list[tuple[str, mx.array]]) -> dict | N
 def _patched_load_weights(self, weights, strict=False):
     """Patched load_weights that handles quantized weights.
 
-    If quantized keys (.scales, .biases) are detected, calls nn.quantize()
-    on the model first to replace nn.Linear with nn.QuantizedLinear,
-    then loads the weights normally.
+    Only quantizes transformer_blocks (the bulk of the model). Other layers
+    like adaln_single, caption_projection, proj_out, patchify_proj are kept
+    in bf16 for precision — these are small but critical for correct output.
     """
     weight_items = weights if isinstance(weights, list) else list(weights)
     qconfig = _has_quantized_weights(weight_items)
 
     if qconfig is not None:
-        # Infer group_size from weight shapes
-        for k, v in weight_items:
-            if k.endswith(".scales"):
-                base = k.rsplit(".scales", 1)[0]
-                for k2, v2 in weight_items:
-                    if k2 == base + ".weight":
-                        weight_cols = v2.shape[-1]
-                        num_groups = v.shape[-1]
-                        if num_groups > 0:
-                            in_features = weight_cols * 32 // qconfig["bits"]
-                            qconfig["group_size"] = in_features // num_groups
-                        break
-                break
-
+        bits = qconfig["bits"]
+        group_size = qconfig["group_size"]
         log.info(
             "Detected quantized weights (bits=%d, group_size=%d). "
-            "Converting model layers to QuantizedLinear...",
-            qconfig["bits"],
-            qconfig["group_size"],
+            "Converting transformer_blocks to QuantizedLinear...",
+            bits,
+            group_size,
         )
-        nn.quantize(self, bits=qconfig["bits"], group_size=qconfig["group_size"])
-        log.info("Model layers converted to QuantizedLinear")
+
+        # Only quantize Linear layers inside transformer_blocks — other layers
+        # (adaln, caption_projection, proj_out, patchify_proj) stay in bf16
+        # to avoid precision loss in these critical components.
+        def _block_only_predicate(path: str, module: nn.Module) -> bool:
+            return isinstance(module, nn.Linear) and "transformer_blocks" in path
+
+        nn.quantize(
+            self,
+            bits=bits,
+            group_size=group_size,
+            class_predicate=_block_only_predicate,
+        )
+        log.info("Transformer blocks converted to QuantizedLinear")
 
     return _original_load_weights(self, weight_items, strict=strict)
 
@@ -241,9 +264,10 @@ def apply_patch():
             log.info("Text encoder loaded successfully (split model)")
             # Mark to skip the next mx.eval(text_encoder.parameters()) call
             # that generate_av.py does after load(). This prevents OOM on 32GB.
+            # Instead, we pre-materialize only the language model params (~6GB)
+            # which is safe. The full parameters() call materializes ~9GB at once
+            # (LM + connectors) which causes Metal OOM.
             self._skip_bulk_eval = True
-            # Reduce max_length from 1024 to 256 to avoid Metal OOM during forward pass
-            self._use_reduced_max_length = True
             import gc
             gc.collect()
             mx.clear_cache()
@@ -258,36 +282,26 @@ def apply_patch():
     _original_te_parameters = LTX2TextEncoder.parameters
 
     def _patched_te_parameters(self):
-        """Skip bulk parameter materialization when _skip_bulk_eval is set.
+        """Materialize only language model params instead of everything.
 
         generate_av.py calls mx.eval(text_encoder.parameters()) after load(),
-        which materializes ~9GB at once and causes Metal OOM on 32GB machines.
-        When _skip_bulk_eval is True, return an empty dict so the bulk eval
-        is a no-op. Parameters will materialize lazily during the forward pass.
+        which materializes ~9GB at once (LM + connectors) causing Metal OOM
+        on 32GB machines. Instead, we materialize only the language model
+        (~6GB) inside this method and return empty dict so the outer
+        mx.eval() is a no-op. Connectors materialize lazily during forward pass.
         """
         if getattr(self, "_skip_bulk_eval", False):
-            log.info("Skipping bulk parameter eval for text encoder (32GB mode)")
+            log.info("Materializing only language model params (32GB mode)")
             self._skip_bulk_eval = False  # Only skip once
-            return {}
+            # mx.eval here is mlx.core.eval (tensor materialization)
+            mx.eval(self.language_model.parameters())  # noqa: S307
+            log.info("Language model params materialized: %.2f GB",
+                     mx.get_active_memory() / (1024**3))
+            return {}  # outer mx.eval() gets empty dict = no-op
         return _original_te_parameters(self)
 
     LTX2TextEncoder.parameters = _patched_te_parameters
     log.info("Text encoder parameters() patch applied (skip bulk eval)")
-
-    # Patch encode() to use shorter max_length on 32GB machines.
-    # Default max_length=1024 creates massive activation tensors during
-    # Gemma 3 12B forward pass, causing Metal OOM on 32GB.
-    # max_length=256 fits comfortably and is enough for video prompts (<200 words).
-    _original_te_encode = LTX2TextEncoder.encode
-
-    def _patched_te_encode(self, prompt, max_length=1024, return_audio_embeddings=True):
-        if getattr(self, "_use_reduced_max_length", False) and max_length > 256:
-            log.info("Reducing text encoder max_length from %d to 256 (32GB mode)", max_length)
-            max_length = 256
-        return _original_te_encode(self, prompt, max_length=max_length, return_audio_embeddings=return_audio_embeddings)
-
-    LTX2TextEncoder.encode = _patched_te_encode
-    log.info("Text encoder max_length patch applied (256 for 32GB)")
 
     # Patch load_upsampler to handle split models (no model.safetensors)
     from mlx_video.models.ltx import upsampler as upsampler_mod
@@ -337,3 +351,53 @@ def apply_patch():
     # Also patch the local reference in generate_av
     gen_mod.load_vae_decoder = _patched_load_vae_decoder
     log.info("Split model VAE decoder patch applied")
+
+    # Patch text encoder to skip loading entirely when pre-computed embeddings
+    # are available via LTX_PRECOMPUTED_EMBEDDINGS env var. This saves ~10GB
+    # of text encoder memory in the generation subprocess.
+    import os
+
+    def _has_precomputed_embeddings() -> str | None:
+        path = os.environ.get("LTX_PRECOMPUTED_EMBEDDINGS")
+        if path and Path(path).exists():
+            return path
+        return None
+
+    # Wrap load() to skip when precomputed embeddings exist
+    _wrapped_te_load = LTX2TextEncoder.load
+
+    def _precomputed_te_load(self, *args, **kwargs):
+        if _has_precomputed_embeddings():
+            log.info("Skipping text encoder load — using pre-computed embeddings")
+            self._using_precomputed = True
+            return
+        return _wrapped_te_load(self, *args, **kwargs)
+
+    LTX2TextEncoder.load = _precomputed_te_load
+
+    # Wrap parameters() to return {} when precomputed
+    _wrapped_te_parameters = LTX2TextEncoder.parameters
+
+    def _precomputed_te_parameters(self):
+        if getattr(self, "_using_precomputed", False):
+            return {}
+        return _wrapped_te_parameters(self)
+
+    LTX2TextEncoder.parameters = _precomputed_te_parameters
+
+    # Wrap __call__() to load from file when precomputed
+    _original_te_call = LTX2TextEncoder.__call__
+
+    def _patched_te_call(self, *args, **kwargs):
+        emb_path = _has_precomputed_embeddings()
+        if emb_path:
+            log.info("Loading pre-computed embeddings from %s", emb_path)
+            data = mx.load(emb_path)
+            video_emb = data["video_embeddings"]
+            audio_emb = data["audio_embeddings"]
+            log.info("Pre-computed video=%s audio=%s", video_emb.shape, audio_emb.shape)
+            return video_emb, audio_emb
+        return _original_te_call(self, *args, **kwargs)
+
+    LTX2TextEncoder.__call__ = _patched_te_call
+    log.info("Pre-computed embeddings patch applied to text encoder")

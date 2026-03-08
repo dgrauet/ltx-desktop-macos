@@ -20,10 +20,10 @@ log = logging.getLogger(__name__)
 # Default model repo — overridden if a local quantized model is detected
 DEFAULT_MODEL_REPO = "notapalindrome/ltx2-mlx-av"
 
-# Quantized model paths (checked in priority order)
+# Quantized model paths (checked in priority order — int8 preferred for quality)
 _QUANTIZED_PATHS = [
-    Path.home() / ".cache/huggingface/hub/ltx2-mlx-av-int4",
     Path.home() / ".cache/huggingface/hub/ltx2-mlx-av-int8",
+    Path.home() / ".cache/huggingface/hub/ltx2-mlx-av-int4",
 ]
 
 # Regex patterns for stderr progress lines
@@ -125,6 +125,60 @@ def _compute_progress(stage: int, step: int, total: int) -> float:
     return 0.85
 
 
+async def _run_text_encoding_subprocess(
+    python_bin: str,
+    model_repo: str,
+    prompt: str,
+    embeddings_path: str,
+    backend_dir: str,
+    text_encoder_repo: str | None = None,
+) -> None:
+    """Run text encoding in an isolated subprocess.
+
+    On 32GB machines, the text encoder (4-bit Gemma 3 12B ~7.5GB + connectors
+    ~2.7GB) and the video transformer (~10GB) cannot coexist. By encoding in a
+    separate subprocess that exits before generation starts, we guarantee the
+    text encoder memory is fully freed.
+    """
+    cmd = [
+        python_bin,
+        "-m", "engine.encode_text_subprocess",
+        "--prompt", prompt,
+        "--model-repo", model_repo,
+        "--output", embeddings_path,
+    ]
+    if text_encoder_repo:
+        cmd.extend(["--text-encoder-repo", text_encoder_repo])
+
+    log.info("Running text encoding subprocess...")
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        cwd=backend_dir,
+    )
+
+    _, stderr_data = await proc.communicate()
+    stderr_text = stderr_data.decode("utf-8", errors="replace")
+
+    if proc.returncode != 0:
+        log.error("Text encoding failed (exit code %d): %s", proc.returncode, stderr_text)
+        if proc.returncode == -6:
+            raise RuntimeError(
+                "Not enough GPU memory for text encoding. "
+                "Close other apps and try again."
+            )
+        raise RuntimeError(
+            f"Text encoding failed with exit code {proc.returncode}:\n{stderr_text}"
+        )
+
+    for line in stderr_text.strip().split("\n"):
+        if line.strip():
+            log.debug("encode_text: %s", line)
+
+    log.info("Text encoding complete, embeddings saved to %s", embeddings_path)
+
+
 async def run_mlx_generation(
     prompt: str,
     height: int,
@@ -141,9 +195,9 @@ async def run_mlx_generation(
 ) -> str:
     """Run MLX video generation as an async subprocess.
 
-    Launches ``python -m mlx_video.generate_av`` with the given parameters,
-    parses progress from stderr in real time, and calls ``progress_callback``
-    for each update.
+    For quantized models on 32GB machines, text encoding runs in a separate
+    subprocess first. The embeddings are saved to a temp file and passed to
+    the generation subprocess via the LTX_PRECOMPUTED_EMBEDDINGS env var.
 
     Args:
         prompt: Text prompt describing the video to generate.
@@ -177,6 +231,38 @@ async def run_mlx_generation(
     else:
         module = "mlx_video.generate_av"
 
+    # Ensure output directory exists
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+
+    # Run from backend/ directory so engine.* imports work for quantized wrapper
+    backend_dir = str(Path(__file__).resolve().parent.parent)
+
+    # Get 4-bit text encoder path
+    text_encoder_4bit = _get_text_encoder_4bit()
+
+    # For quantized models, run text encoding in a separate subprocess
+    # to avoid OOM when both text encoder and transformer compete for GPU memory
+    embeddings_path: str | None = None
+    if is_quantized:
+        import tempfile
+        embeddings_dir = Path(output_path).parent
+        embeddings_path = str(embeddings_dir / f"_embeddings_{Path(output_path).stem}.npz")
+
+        if progress_callback is not None:
+            await progress_callback(0, 0, 0, 0.01)
+
+        await _run_text_encoding_subprocess(
+            python_bin=python_bin,
+            model_repo=model_repo,
+            prompt=prompt,
+            embeddings_path=embeddings_path,
+            backend_dir=backend_dir,
+            text_encoder_repo=text_encoder_4bit,
+        )
+
+        if progress_callback is not None:
+            await progress_callback(0, 0, 0, 0.05)
+
     cmd = [
         python_bin,
         "-m", module,
@@ -191,9 +277,8 @@ async def run_mlx_generation(
         "--tiling", tiling,
     ]
 
-    # Use 4-bit text encoder on memory-constrained machines
-    text_encoder_4bit = _get_text_encoder_4bit()
-    if text_encoder_4bit:
+    # Use 4-bit text encoder (only needed if not using precomputed embeddings)
+    if text_encoder_4bit and not embeddings_path:
         cmd.extend(["--text-encoder-repo", text_encoder_4bit])
 
     if image is not None:
@@ -202,17 +287,19 @@ async def run_mlx_generation(
     log.info("Starting MLX generation: %s", " ".join(cmd[:6]) + " ...")
     log.debug("Full command: %s", cmd)
 
-    # Ensure output directory exists
-    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-
-    # Run from backend/ directory so engine.* imports work for quantized wrapper
-    backend_dir = str(Path(__file__).resolve().parent.parent)
+    # Set up environment with precomputed embeddings path
+    env = None
+    if embeddings_path:
+        import os
+        env = os.environ.copy()
+        env["LTX_PRECOMPUTED_EMBEDDINGS"] = embeddings_path
 
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         cwd=backend_dir,
+        env=env,
     )
 
     stderr_lines: list[str] = []
@@ -265,6 +352,13 @@ async def run_mlx_generation(
 
     # Wait for process to complete
     await proc.wait()
+
+    # Cleanup temp embeddings file
+    if embeddings_path:
+        try:
+            Path(embeddings_path).unlink(missing_ok=True)
+        except OSError:
+            pass
 
     # Cleanup Metal memory after generation
     aggressive_cleanup()
