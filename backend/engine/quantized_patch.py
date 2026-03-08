@@ -352,6 +352,157 @@ def apply_patch():
     gen_mod.load_vae_decoder = _patched_load_vae_decoder
     log.info("Split model VAE decoder patch applied")
 
+    # Patch load_vae_encoder for I2V — custom loader for split models.
+    # The original loader uses tree_unflatten which converts numeric keys
+    # to list indices, but VideoEncoder.down_blocks is a dict with integer
+    # keys. We bypass this by loading weights manually with list→dict fixup.
+    from mlx_video.models.ltx.video_vae import encoder as encoder_mod
+    _original_load_vae_encoder = encoder_mod.load_vae_encoder
+
+    def _patched_load_vae_encoder(weights_path: str, use_unified: bool = False):
+        """Patched VAE encoder loader for split models.
+
+        Handles two issues with the original loader:
+        1. Split model: loads from vae_encoder.safetensors instead of model.safetensors
+        2. tree_unflatten bug: converts numeric keys to lists, but VideoEncoder
+           uses dicts with integer keys for down_blocks. We fix this with a
+           custom weight application that converts lists back to dicts.
+        """
+        path = Path(weights_path)
+        is_split = use_unified and path.is_dir() and not (path / "model.safetensors").exists()
+
+        if not is_split:
+            return _original_load_vae_encoder(weights_path, use_unified=use_unified)
+
+        vae_file = path / "vae_encoder.safetensors"
+        if not vae_file.exists():
+            return _original_load_vae_encoder(weights_path, use_unified=use_unified)
+
+        log.info("Loading VAE encoder from vae_encoder.safetensors (custom loader)")
+
+        # 1. Read config from safetensors metadata
+        import json as _json
+        from safetensors import safe_open
+        from mlx_video.models.ltx.video_vae.video_vae import (
+            VideoEncoder, LogVarianceType, NormLayerType, PaddingModeType,
+        )
+
+        encoder_blocks = []
+        norm_layer = NormLayerType.PIXEL_NORM
+        latent_log_var = LogVarianceType.UNIFORM
+        patch_size = 4
+
+        try:
+            with safe_open(str(vae_file), framework="numpy") as f:
+                metadata = f.metadata()
+                if metadata and "config" in metadata:
+                    configs = _json.loads(metadata["config"])
+                    vae_config = configs.get("vae", {})
+                    for block in vae_config.get("encoder_blocks", []):
+                        if isinstance(block, list) and len(block) == 2:
+                            encoder_blocks.append((block[0], block[1]))
+                    norm_str = vae_config.get("norm_layer", "pixel_norm")
+                    norm_layer = (
+                        NormLayerType.PIXEL_NORM if norm_str == "pixel_norm"
+                        else NormLayerType.GROUP_NORM
+                    )
+                    var_str = vae_config.get("latent_log_var", "uniform")
+                    latent_log_var = {
+                        "uniform": LogVarianceType.UNIFORM,
+                        "per_channel": LogVarianceType.PER_CHANNEL,
+                        "constant": LogVarianceType.CONSTANT,
+                    }.get(var_str, LogVarianceType.NONE)
+                    patch_size = vae_config.get("patch_size", 4)
+        except Exception as e:
+            log.warning("Could not read encoder config from metadata: %s", e)
+
+        if not encoder_blocks:
+            encoder_blocks = [
+                ("res_x", {"num_layers": 4}),
+                ("compress_space_res", {"multiplier": 2}),
+                ("res_x", {"num_layers": 6}),
+                ("compress_time_res", {"multiplier": 2}),
+                ("res_x", {"num_layers": 6}),
+                ("compress_all_res", {"multiplier": 2}),
+                ("res_x", {"num_layers": 2}),
+                ("compress_all_res", {"multiplier": 2}),
+                ("res_x", {"num_layers": 2}),
+            ]
+
+        log.info("Encoder config: %d blocks, patch_size=%d", len(encoder_blocks), patch_size)
+
+        # 2. Create encoder
+        encoder = VideoEncoder(
+            convolution_dimensions=3,
+            in_channels=3,
+            out_channels=128,
+            encoder_blocks=encoder_blocks,
+            patch_size=patch_size,
+            norm_layer=norm_layer,
+            latent_log_var=latent_log_var,
+            encoder_spatial_padding_mode=PaddingModeType.ZEROS,
+        )
+
+        # 3. Load weights from split file
+        weights = mx.load(str(vae_file))
+        log.info("Loaded %d weight keys from vae_encoder.safetensors", len(weights))
+
+        # 4. Strip vae_encoder. prefix and load per-channel stats
+        prefix = "vae_encoder."
+        encoder_weights = {}
+        for key, value in weights.items():
+            if not key.startswith(prefix):
+                continue
+            new_key = key[len(prefix):]
+
+            # Load per-channel statistics directly onto the encoder
+            if new_key == "per_channel_statistics._mean_of_means":
+                encoder.per_channel_statistics.mean = value
+                continue
+            if new_key == "per_channel_statistics._std_of_means":
+                encoder.per_channel_statistics.std = value
+                continue
+
+            # Skip per_channel_statistics sub-keys (handled above)
+            if new_key.startswith("per_channel_statistics."):
+                continue
+
+            # NO Conv3d transpose — split files are already in MLX format
+            encoder_weights[new_key] = value
+
+        del weights
+        log.info("Prepared %d encoder weight keys (prefix stripped)", len(encoder_weights))
+
+        # 5. Apply weights using tree_unflatten + list→dict fixup.
+        # tree_unflatten converts numeric keys (down_blocks.0.xxx) to list
+        # indices, but VideoEncoder.down_blocks is a dict{int: Module}.
+        # We fix this by converting lists back to dicts at the down_blocks level.
+        from mlx.utils import tree_unflatten
+
+        nested = tree_unflatten(list(encoder_weights.items()))
+
+        def _lists_to_dicts(tree):
+            """Recursively convert lists to dicts with integer keys."""
+            if isinstance(tree, list):
+                return {i: _lists_to_dicts(v) for i, v in enumerate(tree)}
+            if isinstance(tree, dict):
+                return {k: _lists_to_dicts(v) for k, v in tree.items()}
+            return tree
+
+        if "down_blocks" in nested and isinstance(nested["down_blocks"], list):
+            nested["down_blocks"] = {
+                i: _lists_to_dicts(v) for i, v in enumerate(nested["down_blocks"])
+            }
+            log.info("Converted down_blocks from list to dict (%d blocks)", len(nested["down_blocks"]))
+
+        encoder.update(nested)
+        log.info("VAE encoder loaded successfully (%d blocks)", len(encoder.down_blocks))
+        return encoder
+
+    encoder_mod.load_vae_encoder = _patched_load_vae_encoder
+    gen_mod.load_vae_encoder = _patched_load_vae_encoder
+    log.info("Split model VAE encoder patch applied")
+
     # Patch text encoder to skip loading entirely when pre-computed embeddings
     # are available via LTX_PRECOMPUTED_EMBEDDINGS env var. This saves ~10GB
     # of text encoder memory in the generation subprocess.
