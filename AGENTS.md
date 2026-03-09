@@ -165,7 +165,9 @@ Key constraints:
 
 All 5 sprints have been completed. Code is written and app builds/launches. Real MLX inference is working (T2V, I2V, preview, prompt enhancement with quantized int8 model).
 
-**Current focus**: migrating from LTX-2.0 (19B) to LTX-2.3 (22B) for improved quality.
+LTX-2.3 (22B) migration is complete: vendored model architecture (`engine/ltx23_model/`), conversion script, VAE encoder/decoder, audio VAE decoder, HiFi-GAN vocoder with BWE. End-to-end T2V and I2V verified working.
+
+**Remaining**: 97-frame marathon test, progressive diffusion display, history view integration, real TTS via MLX-Audio.
 
 ---
 

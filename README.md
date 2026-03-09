@@ -104,6 +104,7 @@ The backend runs as a separate process managed by the SwiftUI app's `ProcessMana
 ### Generation
 - **Text-to-Video (T2V)**: prompt → video with synchronized audio via LTX-2.3 on MLX
 - **Image-to-Video (I2V)**: drag-and-drop source image conditions the first frame, with adjustable image strength
+- **Synchronized audio**: audio VAE decoder + HiFi-GAN/BigVGAN v2 vocoder with bandwidth extension (16 kHz → 48 kHz)
 - **Rapid preview**: 384x256, 4 steps — validates prompt direction in seconds before full render
 - **Prompt enhancement**: Qwen3.5-2B-4bit rewrites short prompts into detailed LTX-optimized descriptions (lazy load/unload)
 - **Retake**: regenerate a specific time segment of an existing video
@@ -270,11 +271,25 @@ ltx-desktop-macos/
 ├── backend/                      # Python FastAPI backend
 │   ├── main.py                   # All API routes (single-file MVP)
 │   ├── engine/
+│   │   ├── generate_v23.py       # LTX-2.3 generation entry point (subprocess)
+│   │   ├── encode_text_subprocess.py  # Text encoding subprocess (Gemma 3 12B)
+│   │   ├── mlx_runner.py         # Subprocess orchestrator (text encode → generate)
 │   │   ├── memory_manager.py     # aggressive_cleanup, periodic reload, memory stats
 │   │   ├── model_manager.py      # MLX model load/unload lifecycle
 │   │   ├── prompt_enhancer.py    # Qwen3.5-2B lazy load/unload
 │   │   ├── lora_manager.py       # LoRA scan, load, compatibility check
 │   │   ├── teacache.py           # TeaCache MLX port (block-output caching)
+│   │   ├── ltx23_model/          # Vendored LTX-2.3 model architecture
+│   │   │   ├── transformer.py    # DiT transformer blocks
+│   │   │   ├── attention.py      # Multi-head attention + RoPE
+│   │   │   ├── loader.py         # Quantized model loading
+│   │   │   ├── pipeline.py       # Diffusion generation loop
+│   │   │   ├── vae_decoder.py    # Video VAE decoder (streaming to ffmpeg)
+│   │   │   ├── vae_encoder.py    # Video VAE encoder (for I2V)
+│   │   │   ├── audio_decoder.py  # Audio VAE decoder (latent → mel)
+│   │   │   ├── vocoder.py        # HiFi-GAN vocoder + BWE (mel → 48kHz waveform)
+│   │   │   ├── text_encoder.py   # Gemma 3 text encoder with dual projections
+│   │   │   └── connector.py      # Embeddings connector
 │   │   └── pipelines/
 │   │       ├── text_to_video.py  # Full T2V pipeline
 │   │       ├── image_to_video.py # I2V pipeline
@@ -290,7 +305,9 @@ ltx-desktop-macos/
 │   └── test_marathon.py          # 10-gen stability test (release gate)
 ├── scripts/
 │   ├── setup.sh                  # Full installation
-│   ├── download_models.sh        # HuggingFace model download
+│   ├── convert_ltx23.py          # PyTorch → MLX split + quantization
+│   ├── validate_ltx23.py         # Validate converted model integrity
+│   ├── download_models.sh        # HuggingFace model download (legacy)
 │   └── dev.sh                    # Dev launch (backend + Xcode hint)
 └── models/                       # Gitignored — ~42 GB+
 ```
@@ -326,7 +343,6 @@ The marathon test is the release gate. Pass criteria:
 - **Timeline editor**: deliberately deferred — export to FCPXML for Final Cut Pro is the recommended workflow.
 - **Batch generation queue**: not yet implemented.
 - **Progressive diffusion display**: intermediate frames during generation not yet streamed to UI.
-- **LTX-2.3 migration**: converting from LTX-2.0 to LTX-2.3 (22B) — requires patches for gated attention and cross-attention AdaLN.
 
 ---
 

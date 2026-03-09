@@ -144,7 +144,7 @@ The prompt enhancer and the video model should **never be loaded simultaneously*
 ```
 1. User writes prompt
 2. Load Qwen3.5-2B (~1.2GB) → enhance prompt → unload Qwen3.5-2B
-3. Free memory: mx.metal.clear_cache()
+3. Free memory: mx.clear_cache()
 4. Load LTX-2.3 (~42GB) → generate video → keep loaded for next generation
 5. If user wants to enhance another prompt → unload LTX-2.3 first (or use cached model)
 ```
@@ -655,7 +655,7 @@ def aggressive_cleanup():
     """Force-free Metal memory between pipeline stages.
     MUST be called between every major stage and between every generation."""
     gc.collect()                    # Python garbage collector
-    mx.metal.clear_cache()          # MLX Metal cache
+    mx.clear_cache()                # MLX Metal cache (mx.metal.clear_cache deprecated since 0.31)
     # Force synchronization to ensure all GPU work is complete
     mx.eval(mx.zeros(1))           # Barrier: wait for all pending GPU ops
 
@@ -791,9 +791,9 @@ def get_memory_stats() -> dict:
     """Called by the /api/v1/system/memory endpoint.
     Frontend displays these in real-time."""
     return {
-        "active_memory_gb": mx.metal.get_active_memory() / (1024**3),
-        "cache_memory_gb": mx.metal.get_cache_memory() / (1024**3),
-        "peak_memory_gb": mx.metal.get_peak_memory() / (1024**3),
+        "active_memory_gb": mx.get_active_memory() / (1024**3),
+        "cache_memory_gb": mx.get_cache_memory() / (1024**3),
+        "peak_memory_gb": mx.get_peak_memory() / (1024**3),
         "system_available_gb": os_available_memory() / (1024**3),
         "generation_count_since_reload": generation_count,
         "next_reload_in": MAX_GENERATIONS_BEFORE_RELOAD - generation_count,
@@ -801,7 +801,7 @@ def get_memory_stats() -> dict:
 
 # Also reset peak memory counter after each generation
 # to track per-generation peaks:
-mx.metal.reset_peak_memory()
+mx.reset_peak_memory()
 ```
 
 #### Warning Signs to Monitor
@@ -851,7 +851,7 @@ enhanced = generate(model, tokenizer, prompt=user_prompt, system=system, max_tok
 
 # Unload to free memory before video generation
 del model, tokenizer
-mx.metal.clear_cache()
+mx.clear_cache()
 ```
 
 ### Weight Conversion
@@ -1119,7 +1119,7 @@ app_start
 - **Trying to batch multiple videos**: LTX-2.3 at 19B params leaves no room for batch>1 on consumer hardware.
 - **Lower precision than int4**: quality degrades significantly below 4-bit for DiT models.
 - **Reducing guidance scale to 1.0**: saves negligible compute (LTX distilled already doesn't use CFG).
-- **`mx.metal.set_memory_limit()`**: this caps MLX's allocation but doesn't prevent Metal's own caching. It causes premature OOM rather than solving fragmentation.
+- **`mx.set_memory_limit()`** (formerly `mx.metal.set_memory_limit()`): this caps MLX's allocation but doesn't prevent Metal's own caching. It causes premature OOM rather than solving fragmentation.
 - **Temporal sliding window on the diffusion loop**: LTX-2.3's DiT uses global temporal attention. Windowing mid-diffusion breaks the attention pattern the model was trained with. For longer videos, use overlapping segment generation (ExtendPipeline) instead.
 
 ---
@@ -1180,12 +1180,12 @@ open app/LTXDesktop.xcodeproj
 
 All foundation sprints are complete. The app builds, launches, and performs real MLX inference (T2V, I2V, preview, prompt enhancement with quantized int8 model on 32GB machine).
 
-**Active work**: migrating from LTX-2.0 (19B) to LTX-2.3 (22B) — conversion script written, requires patching mlx_video for gated attention and cross-attention AdaLN.
+LTX-2.3 (22B) migration is complete: vendored model architecture in `engine/ltx23_model/` (transformer, VAE encoder/decoder, audio VAE decoder, HiFi-GAN vocoder with BWE, text encoder, conversion script). End-to-end T2V and I2V verified working with int8 quantized model.
 
 **Remaining items**:
+- 97-frame marathon test at full resolution
 - Progressive diffusion display (intermediate frames during generation)
 - History view connection to real backend data
-- Marathon test with real MLX inference
 - Real TTS via MLX-Audio (currently sine-wave stub)
 - Model download UI in Settings
 - Batch generation queue
