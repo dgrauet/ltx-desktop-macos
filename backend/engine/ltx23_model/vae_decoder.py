@@ -193,14 +193,20 @@ class DepthToSpaceUpsample(nn.Module):
 
 @mx.compile
 def unpatchify(x: mx.array, patch_size: int) -> mx.array:
-    """Depth-to-space: (B, C*p*p, F, H, W) -> (B, C, F, H*p, W*p)."""
+    """Depth-to-space: (B, C*p*p, F, H, W) -> (B, C, F, H*p, W*p).
+
+    Channel layout matches PyTorch einops reference:
+        "b (c p r q) f h w -> b c (f p) (h q) (w r)"
+    where r=patch_size (width, slow axis), q=patch_size (height, fast axis).
+    """
     if patch_size == 1:
         return x
     b, c_packed, f, h, w = x.shape
     p = patch_size
     c = c_packed // (p * p)
-    x = x.reshape(b, c, p, p, f, h, w)
-    x = x.transpose(0, 1, 4, 5, 2, 6, 3)
+    # Channels packed as (c, r_w, q_h): r_w is slow (×p), q_h is fast (×1)
+    x = x.reshape(b, c, p, p, f, h, w)       # (b, c, r_w, q_h, f, h, w)
+    x = x.transpose(0, 1, 4, 5, 3, 6, 2)     # (b, c, f, h, q_h, w, r_w)
     x = x.reshape(b, c, f, h * p, w * p)
     return x
 
@@ -470,7 +476,8 @@ def streaming_decode_to_ffmpeg(
         "-r", str(fps),
         "-i", "-",
         "-c:v", "libx264",
-        "-preset", "fast",
+        "-crf", "18",
+        "-preset", "medium",
         "-pix_fmt", "yuv420p",
         output_path,
     ]

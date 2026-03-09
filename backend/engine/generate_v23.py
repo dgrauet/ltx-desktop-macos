@@ -326,8 +326,13 @@ def _run_two_stage(
         mx.eval(audio_latent)
 
     log.info("Stage 1 complete. Video latent: %s", video_latent.shape)
+
+    # Unload transformer before upscale — frees ~21GB for upsampler activations
+    del model
+    del output_s1
     gc.collect()
     mx.clear_cache()
+    log.info("Transformer unloaded for upscale phase")
 
     # --- Upscale latent 2x with neural upsampler ---
     _progress("STATUS:Upscaling latent 2x")
@@ -348,7 +353,13 @@ def _run_two_stage(
     gc.collect()
     mx.clear_cache()
 
-    # --- Stage 2: Refine at target resolution ---
+    # --- Stage 2: Reload transformer and refine at target resolution ---
+    _progress("STATUS:Reloading model for Stage 2")
+    from engine.ltx23_model.loader import load_ltx23_transformer
+
+    model = load_ltx23_transformer(model_dir, low_memory=True, as_x0=True)
+    log.info("Transformer reloaded for Stage 2")
+
     num_stage2_steps = len(STAGE_2_SIGMAS) - 1
     _progress("STATUS:Stage 2 - refining at target resolution")
     log.info("Stage 2: %dx%d, %d steps, sigmas=%s",
@@ -450,7 +461,8 @@ def _ffmpeg_upscale_2x(video_path: str) -> None:
         "-i", video_path,
         "-vf", "scale=iw*2:ih*2:flags=lanczos",
         "-c:v", "libx264",
-        "-preset", "fast",
+        "-crf", "18",
+        "-preset", "medium",
         "-pix_fmt", "yuv420p",
         "-c:a", "copy",
         tmp_path,

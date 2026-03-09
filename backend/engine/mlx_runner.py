@@ -463,6 +463,8 @@ async def run_mlx_generation(
                 pct = 0.06
             elif "upscaling latent" in status_msg.lower():
                 pct = 0.57
+            elif "reloading model" in status_msg.lower():
+                pct = 0.60
             elif "stage 2" in status_msg.lower():
                 pct = 0.63
             elif "upscaling" in status_msg.lower():
