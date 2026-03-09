@@ -4,9 +4,9 @@ Native macOS application for local AI video generation using **LTX-2.3** on Appl
 
 ## What It Is
 
-LTX Desktop replicates the features of [Lightricks LTX Desktop](https://github.com/Lightricks/ltx-desktop) but replaces NVIDIA/CUDA inference with 100% local inference on Apple Silicon unified memory. The official macOS version only supports cloud API — this project eliminates that dependency.
+LTX Desktop replicates the features of [Lightricks LTX Desktop](https://github.com/Lightricks/ltx-desktop) but replaces NVIDIA/CUDA inference with 100% local inference on Apple Silicon unified memory via **MLX**. The official macOS version only supports cloud API — this project eliminates that dependency.
 
-**Stack**: SwiftUI (native macOS app) + Python FastAPI backend + MLX inference engine.
+**Stack**: SwiftUI (native macOS app) + Python FastAPI backend + MLX inference engine (LTX-2.3, 22B params).
 
 ---
 
@@ -43,14 +43,19 @@ bash scripts/setup.sh
 
 `setup.sh` verifies macOS version, installs dependencies, and creates the Python virtual environment.
 
-### 3. Download models
+### 3. Download and convert models
 
 ```bash
-bash scripts/download_models.sh
+# Download and convert LTX-2.3 to MLX split format with int8 quantization
+cd backend
+uv run python ../scripts/convert_ltx23.py --quantize --bits 8
+
+# Download prompt enhancer
+uv run python -c "from huggingface_hub import snapshot_download; snapshot_download('mlx-community/Qwen3.5-2B-4bit')"
 ```
 
-Downloads to `~/.cache/huggingface/`:
-- `notapalindrome/ltx2-mlx-av` (~42 GB) — main video generation model (MLX-native, distilled + audio)
+Downloads and converts to `~/.cache/huggingface/`:
+- `Lightricks/LTX-2.3` (~43 GB download → ~23 GB int8 quantized) — video generation model
 - `mlx-community/Qwen3.5-2B-4bit` (~1.2 GB) — prompt enhancement model
 
 ### 4. Start the backend
@@ -94,47 +99,28 @@ The backend runs as a separate process managed by the SwiftUI app's `ProcessMana
 
 ---
 
-## Features by Sprint
+## Features
 
-### Sprint 1 — Foundation
-- FastAPI backend with health, system info, and memory endpoints
-- Text-to-video generation pipeline (stubbed MLX, real ffmpeg output)
-- WebSocket real-time progress streaming
-- SwiftUI app: prompt field, generate button, progress bar
-- `ProcessManager`: auto-starts backend, polls `/health` until ready, shows "Preparing engine..." splash
-- Memory manager: `aggressive_cleanup()`, periodic model reload every 5 generations
-- Marathon generation test (10 consecutive generations, memory stability check)
+### Generation
+- **Text-to-Video (T2V)**: prompt → video with synchronized audio via LTX-2.3 on MLX
+- **Image-to-Video (I2V)**: drag-and-drop source image conditions the first frame, with adjustable image strength
+- **Rapid preview**: 384x256, 4 steps — validates prompt direction in seconds before full render
+- **Prompt enhancement**: Qwen3.5-2B-4bit rewrites short prompts into detailed LTX-optimized descriptions (lazy load/unload)
+- **Retake**: regenerate a specific time segment of an existing video
+- **Extend**: extend a video forward or backward from its endpoint
 
-### Sprint 2 — Core Features
-- Rapid preview: 384x256, 4 steps — validates prompt direction in seconds before full render
-- Progressive diffusion display: intermediate frames streamed via WebSocket during generation
-- Image-to-Video (I2V): drag-and-drop source image, conditions first frame
-- Streaming VAE decode to ffmpeg pipe (never decodes all frames into RAM simultaneously)
-- TeaCache MLX port: block-output caching, ~1.6-2.1x speedup, `rel_l1_thresh=0.03`
-- Memory monitor panel in Settings: active/cache/peak/available with color-coded warnings
+### Performance & Stability
+- **Streaming VAE decode**: frames decoded one-by-one into ffmpeg pipe (never all in RAM)
+- **TeaCache**: block-output caching for ~1.6-2x inference speedup
+- **Memory management**: aggressive cleanup between stages, periodic model reload every 5 generations
+- **Memory monitor**: real-time active/cache/peak/available with color-coded warnings
 
-### Sprint 3 — Enhancement
-- Prompt enhancement: Qwen3.5-2B-4bit via mlx-lm, lazy load/unload, never coexists with video model
-- Retake pipeline: regenerate a specific time segment of an existing video
-- Extend pipeline: extend a video forward or backward from its endpoint
-- HistoryView: LazyVGrid of video thumbnails (AVFoundation async), detail panel with AVPlayer
-- Settings: General tab (enhance toggle, output directory) + Models tab
-- Enhance button in GenerationView (Cmd+E, sparkles icon, spinner during enhancement)
-
-### Sprint 4 — LoRA, Audio, Export
-- LoRA manager: scan `~/.ltx-desktop/loras/` for `.safetensors`, compatibility check, built-in stubs
-- LoRAView: toggle switches, incompatibility warnings, empty state
-- Audio TTS engine: MLX-Audio stub (sine-wave placeholder, mlx_audio-ready interface)
-- Audio mixer: ffmpeg filter graph with amix, volume ducking (music ducks to 20% with TTS active)
-- Export: H.264/H.265/ProRes, MP4/MOV via ffmpeg re-encode
-- FCPXML export: FCPXML 1.11 for Final Cut Pro, compatible with Premiere/DaVinci via XML
-- ExportSheet in HistoryView: format/codec/bitrate pickers, Reveal in Finder
-- FPS picker (24/30) and word count label (orange >150 words, red >200 words) in GenerationView
-
-### Sprint 5 — Stability & Release
-- Full API test suite covering all endpoints (Sprint 1-4)
-- Marathon test: 10 consecutive generations, memory stability, TeaCache validation
-- README and release preparation
+### UI & Export
+- **SwiftUI native app**: prompt field, parameter controls, video preview with AVPlayer
+- **History view**: video archive grid with thumbnails and metadata
+- **Export**: H.264/H.265/ProRes (MP4/MOV) + FCPXML for Final Cut Pro
+- **LoRA support**: scan `~/.ltx-desktop/loras/`, toggle switches, compatibility warnings
+- **Audio**: TTS engine interface (MLX-Audio ready), ffmpeg-based audio mixing
 
 ---
 
@@ -333,16 +319,14 @@ The marathon test is the release gate. Pass criteria:
 
 ---
 
-## What Is Not Yet Implemented
+## Known Limitations
 
-These are planned but not yet built:
-
-- **Real MLX inference**: all pipelines are currently stubs that produce ffmpeg-generated placeholder videos. The pipeline structure, memory management, and API are fully in place — plugging in the real `mlx-video-with-audio` calls is the next step.
-- **Real prompt enhancement**: mlx-lm integration is wired up — once `mlx-lm` is installed, the `/prompt/enhance` endpoint uses Qwen3.5-2B automatically.
-- **Real TTS**: `tts_engine.py` generates a sine-wave placeholder. The interface is designed for MLX-Audio (Kokoro, CSM).
+- **TTS**: `tts_engine.py` generates a sine-wave placeholder. The interface is designed for MLX-Audio (Kokoro, CSM) — real TTS not yet integrated.
 - **Model download UI**: the Models tab in Settings shows model status but download buttons are not yet wired to the backend.
-- **Timeline editor**: deliberately deferred — export to FCPXML for Final Cut Pro is the recommended workflow instead.
-- **Batch generation queue**: coming in a future sprint.
+- **Timeline editor**: deliberately deferred — export to FCPXML for Final Cut Pro is the recommended workflow.
+- **Batch generation queue**: not yet implemented.
+- **Progressive diffusion display**: intermediate frames during generation not yet streamed to UI.
+- **LTX-2.3 migration**: converting from LTX-2.0 to LTX-2.3 (22B) — requires patches for gated attention and cross-attention AdaLN.
 
 ---
 

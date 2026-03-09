@@ -42,7 +42,7 @@ This test takes ~15-30 minutes depending on hardware.
 ✓ all output files are valid (ffprobe check)
 ```
 
-**Run**: `pytest tests/test_marathon.py -v --timeout=3600`
+**Run**: `pytest tests/test_marathon.py -v -s`
 
 ### 2. 🟡 test_memory.py — High priority
 
@@ -113,16 +113,16 @@ Prompt Enhancement Tests
 
 ```bash
 # Full suite (requires models downloaded + backend running)
-pytest tests/ -v --timeout=3600
+pytest tests/ -v -s
 
 # Quick smoke test (no models needed)
 pytest tests/test_api.py::test_health_endpoint -v
 
 # Memory-focused
-pytest tests/test_memory.py tests/test_marathon.py -v --timeout=3600
+pytest tests/test_memory.py tests/test_marathon.py -v -s
 
 # Pipeline only
-pytest tests/test_inference.py -v --timeout=600
+pytest tests/test_inference.py -v -s
 ```
 
 ## Fixtures

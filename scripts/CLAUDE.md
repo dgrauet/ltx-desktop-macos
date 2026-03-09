@@ -30,19 +30,31 @@ set -e
 - Print clear progress messages
 - Exit with helpful error if Apple Silicon not detected (MLX won't work on Intel)
 
-### download_models.sh — Model Download
+### download_models.sh — Model Download (legacy)
+
+Downloads pre-converted models. For LTX-2.3, use `convert_ltx23.py` instead.
+
+### convert_ltx23.py — LTX-2.3 Conversion
+
+Converts the official `Lightricks/LTX-2.3` PyTorch checkpoint to MLX split format:
+- Downloads `ltx-2.3-22b-distilled.safetensors` (~43 GB) from HuggingFace
+- Splits into per-component files (transformer, VAE, connector, vocoder)
+- Applies key sanitization (PyTorch → MLX naming)
+- Transposes conv weights to channels-last layout
+- Optionally quantizes transformer to int8 or int4
 
 ```bash
-#!/bin/bash
-set -e
+cd backend
+uv run python ../scripts/convert_ltx23.py --quantize --bits 8
+```
 
-# 1. Check disk space (need ~50GB free)
-# 2. Download LTX-2.3 distilled MLX model
-#    huggingface-cli download notapalindrome/ltx2-mlx-av
-# 3. Download Qwen3.5-2B for prompt enhancement
-#    huggingface-cli download Qwen/Qwen3.5-2B
-# 4. Verify downloads (check file sizes / checksums)
-# 5. Print model locations and sizes
+### validate_ltx23.py — Conversion Validation
+
+Validates a converted LTX-2.3 model: file structure, config, weight keys, shapes, conv layout, quantization integrity.
+
+```bash
+cd backend
+uv run python ../scripts/validate_ltx23.py ~/.cache/huggingface/hub/ltx23-mlx
 ```
 
 **Rules**:

@@ -40,8 +40,8 @@ import gc
 
 def aggressive_cleanup():
     gc.collect()
-    mx.metal.clear_cache()
-    mx.eval(mx.zeros(1))  # Barrier
+    mx.clear_cache()          # Note: mx.metal.clear_cache() is deprecated since MLX 0.31
+    mx.eval(mx.zeros(1))      # Barrier — mx.eval here is mlx.core.eval (tensor materialization)
 ```
 
 **Call this**:
@@ -101,7 +101,7 @@ async def system_info():
 
 @app.get("/api/v1/system/memory")
 async def memory_stats():
-    # mx.metal.get_active_memory() etc.
+    # mx.get_active_memory() etc. (mx.metal.* deprecated since MLX 0.31)
     ...
 
 if __name__ == "__main__":
@@ -159,6 +159,6 @@ backend/
 ## Dependencies
 
 See `pyproject.toml` in the root CLAUDE.md. Key packages:
-- `mlx>=0.31.0`, `mlx-video-with-audio>=0.1.3`, `mlx-lm>=0.24.0`
+- `mlx>=0.31.0`, `mlx-video-with-audio>=0.1.3`, `mlx-lm>=0.31.0`
 - `fastapi>=0.115.0`, `uvicorn>=0.32.0`, `websockets>=13.0`
 - `mlx-audio>=0.3.0` (optional, for TTS)

@@ -1163,14 +1163,11 @@ cd backend
 uv sync
 source .venv/bin/activate
 
-# 4. Download models (choose one)
-# Option A: Pre-converted MLX model (recommended, fastest start)
-python -c "from huggingface_hub import snapshot_download; snapshot_download('notapalindrome/ltx2-mlx-av')"
-# Option B: Official checkpoint (requires conversion)
-python -c "from huggingface_hub import snapshot_download; snapshot_download('Lightricks/LTX-2.3')"
+# 4. Download and convert LTX-2.3 model (~43GB download, converts to MLX split + int8)
+uv run python ../scripts/convert_ltx23.py --quantize --bits 8
 
-# 5. Download prompt enhancer
-python -c "from huggingface_hub import snapshot_download; snapshot_download('Qwen/Qwen3.5-2B')"
+# 5. Download prompt enhancer (~1.2GB)
+python -c "from huggingface_hub import snapshot_download; snapshot_download('mlx-community/Qwen3.5-2B-4bit')"
 
 # 6. Start the backend
 uvicorn main:app --host 127.0.0.1 --port 8000 --reload
@@ -1179,42 +1176,19 @@ uvicorn main:app --host 127.0.0.1 --port 8000 --reload
 open app/LTXDesktop.xcodeproj
 ```
 
-### Recommended Implementation Order
+### Current Status
 
-**Week 1-2: Backend foundation**
-1. `main.py` single file: health check + system info endpoint
-2. Basic T2V endpoint using `mlx-video-with-audio` pipeline
-3. **Aggressive cleanup between stages + memory monitoring endpoint** ← do this NOW, not later
-4. **Kernel warm-up pass at startup + `mx.compile()` on model forward pass** ← early perf win
-5. WebSocket progress reporting
+All foundation sprints are complete. The app builds, launches, and performs real MLX inference (T2V, I2V, preview, prompt enhancement with quantized int8 model on 32GB machine).
 
-**Week 3-4: Frontend MVP + stability validation**
-5. SwiftUI: prompt field + generate button + video preview
-6. SwiftUI: progress bar via WebSocket + memory stats panel
-7. **Run Marathon Generation test (10 consecutive jobs) — fix any memory leaks before proceeding**
-8. SwiftUI: basic settings (resolution, frames, seed)
+**Active work**: migrating from LTX-2.0 (19B) to LTX-2.3 (22B) — conversion script written, requires patching mlx_video for gated attention and cross-attention AdaLN.
 
-**Week 5-6: Core features**
-9. Rapid preview (384×256, 4 steps) — critical UX improvement
-10. Progressive diffusion display during generation
-11. I2V pipeline + image upload UI
-12. **Streaming VAE decode → ffmpeg pipe** (replaces in-memory decode)
-
-**Week 7-8: Enhancement**
-13. Prompt enhancement via Qwen3.5-2B (lazy load/unload)
-14. Retake + extension pipelines
-15. Video history / archive view
-16. Periodic model reload logic (every N generations)
-
-**Week 9-10: Polish**
-17. LoRA support (camera control + custom loading)
-18. Audio: local TTS + background music
-19. Export: MP4/MOV + FCPXML
-
-**Week 11-12: Stability & shipping**
-20. Batch generation queue
-21. **Re-run Marathon Generation test on all target hardware (M1 Max 32GB, M3 Max 64GB, M4 Ultra 128GB)**
-22. Performance profiling + final memory optimization pass
+**Remaining items**:
+- Progressive diffusion display (intermediate frames during generation)
+- History view connection to real backend data
+- Marathon test with real MLX inference
+- Real TTS via MLX-Audio (currently sine-wave stub)
+- Model download UI in Settings
+- Batch generation queue
 
 ---
 

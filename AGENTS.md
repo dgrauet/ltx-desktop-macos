@@ -9,7 +9,7 @@ export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1
 claude
 ```
 
-Then give the lead its first instruction (see README.md).
+Then give the lead its instruction.
 
 ---
 
@@ -146,7 +146,7 @@ Key constraints:
 
 Spawn pattern:
 ```
-Task(agent="qa", prompt="Create setup.sh that checks/installs python 3.12, uv, ffmpeg on macOS. Create download_models.sh for notapalindrome/ltx2-mlx-av and Qwen/Qwen3.5-2B. See scripts/CLAUDE.md.")
+Task(agent="qa", prompt="Create setup.sh that checks/installs python 3.12, uv, ffmpeg on macOS. Create download_models.sh. See scripts/CLAUDE.md.")
 ```
 
 Responsibilities:
@@ -161,92 +161,11 @@ Key constraints:
 
 ---
 
-## Sprint Plan
+## Sprint Status
 
-### Sprint 1 (Week 1-2): Foundation
+All 5 sprints have been completed. Code is written and app builds/launches. Real MLX inference is working (T2V, I2V, preview, prompt enhancement with quantized int8 model).
 
-```
-1. Task(agent="backend-engine", prompt="
-   Implement backend/engine/memory_manager.py with:
-   - aggressive_cleanup() function (gc.collect + mx.metal.clear_cache + barrier)
-   - get_memory_stats() returning active/cache/peak/available
-   - periodic_reload_check() that tracks generation count
-   Then implement a basic T2V pipeline wrapper in backend/engine/pipelines/text_to_video.py 
-   that uses mlx-video-with-audio, calls aggressive_cleanup() between stages,
-   integrates mx.compile() on the model forward pass, and runs a kernel warm-up.
-   Read backend/CLAUDE.md first.")
-
-2. Task(agent="qa", prompt="
-   Create scripts/setup.sh and scripts/download_models.sh.
-   setup.sh: check macOS >= 14, check/install python 3.12, uv, ffmpeg via brew.
-   download_models.sh: download notapalindrome/ltx2-mlx-av and Qwen/Qwen3.5-2B via huggingface-cli.
-   Both must be idempotent. Read scripts/CLAUDE.md first.")
-
-3. [After Agent 1 delivers] Task(agent="backend-api", prompt="
-   Create backend/main.py with FastAPI. Implement:
-   - GET /api/v1/system/health
-   - GET /api/v1/system/info (detect Apple Silicon chip, RAM)
-   - GET /api/v1/system/memory (call engine's get_memory_stats)
-   - POST /api/v1/generate/text-to-video (call engine's T2V pipeline, return job_id)
-   - WS /ws/progress/{job_id} (stream progress from the pipeline)
-   Start as a single main.py file. Read backend/CLAUDE.md first.")
-
-4. [After Agent 2 delivers] Task(agent="frontend", prompt="
-   Create the Xcode project in app/LTXDesktop.xcodeproj.
-   Implement:
-   - ProcessManager.swift: start backend subprocess (uvicorn), poll /health until ready
-   - BackendService.swift: HTTP client + WebSocket for progress
-   - A minimal GenerationView: prompt TextField, generate Button, progress ProgressView
-   - Show 'Preparing engine...' until health check passes
-   Read app/CLAUDE.md first.")
-
-5. [After all above] Task(agent="qa", prompt="
-   Write tests/test_marathon.py: 10 consecutive T2V generations (9 frames, 256×256, 1 step 
-   for speed). Verify no OOM, memory within 20% of gen 1, no gen takes >2× gen 1.
-   Write tests/conftest.py with the backend fixture.
-   RUN the marathon test and report results. Read tests/CLAUDE.md first.")
-```
-
-**GATE**: Marathon test must pass. Fix memory issues before Sprint 2.
-
-### Sprint 2 (Week 3-4): Core Features
-
-```
-Parallel:
-  Task(agent="backend-engine", prompt="Implement rapid preview pipeline (384×256, 4 steps, single-stage). Implement progressive diffusion display (extract intermediate frames every 4th step). Implement I2V pipeline.")
-  Task(agent="backend-api", prompt="Add POST /generate/preview, POST /generate/image-to-video, and intermediate frame support on the WebSocket.")
-  Task(agent="frontend", prompt="Add rapid preview button, image drag-and-drop for I2V, progressive diffusion display in PreviewView, and the MemoryMonitor panel in Settings.")
-
-Then:
-  Task(agent="backend-engine", prompt="Implement streaming VAE decode to ffmpeg pipe. Port TeaCache to MLX (see CLAUDE.md Optimization 4).")
-  Task(agent="qa", prompt="Re-run marathon test with TeaCache enabled. Verify speedup > 1.3× and memory stability.")
-```
-
-### Sprint 3 (Week 5-6): Enhancement
-
-```
-Parallel:
-  Task(agent="backend-engine", prompt="Implement prompt_enhancer.py with Qwen3.5-2B lazy load/unload. Implement retake and extend pipelines. Implement periodic model reload.")
-  Task(agent="backend-api", prompt="Add POST /prompt/enhance, POST /generate/retake, POST /generate/extend endpoints.")
-  Task(agent="frontend", prompt="Build HistoryView with video grid and thumbnails. Build SettingsView with model management. Add prompt enhance button with preview.")
-```
-
-### Sprint 4 (Week 7-8): Polish
-
-```
-Parallel:
-  Task(agent="backend-engine", prompt="Implement lora_manager.py. Implement audio pipelines (TTS via MLX-Audio, music mixing).")
-  Task(agent="backend-api", prompt="Add LoRA endpoints, audio endpoints, export endpoints (ffmpeg + FCPXML).")
-  Task(agent="frontend", prompt="Build LoRAView. Build export UI. Full polish pass.")
-```
-
-### Sprint 5 (Week 9-10): Stability & Ship
-
-```
-  Task(agent="qa", prompt="Run full test suite. Run marathon test on target hardware configs. Report all failures.")
-  [Fix all failures]
-  Lead writes README.md and prepares release.
-```
+**Current focus**: migrating from LTX-2.0 (19B) to LTX-2.3 (22B) for improved quality.
 
 ---
 

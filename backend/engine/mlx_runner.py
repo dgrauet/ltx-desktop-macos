@@ -20,8 +20,9 @@ log = logging.getLogger(__name__)
 # Default model repo — overridden if a local quantized model is detected
 DEFAULT_MODEL_REPO = "notapalindrome/ltx2-mlx-av"
 
-# Quantized model paths (checked in priority order — int8 preferred for quality)
+# Quantized model paths (checked in priority order — v2.3 preferred, then v2.0 int8/int4)
 _QUANTIZED_PATHS = [
+    Path.home() / ".cache/huggingface/hub/ltx23-mlx",
     Path.home() / ".cache/huggingface/hub/ltx2-mlx-av-int8",
     Path.home() / ".cache/huggingface/hub/ltx2-mlx-av-int4",
 ]
@@ -43,14 +44,32 @@ def _is_quantized_model(model_path: Path) -> bool:
     return qconfig.exists()
 
 
-def get_model_repo() -> tuple[str, bool]:
-    """Return the best available model and whether it's quantized.
-
-    Checks for local quantized models (int4 first, then int8). If found,
-    returns the local directory path. Otherwise returns the default HF repo ID.
+def _get_model_version(model_path: Path) -> str:
+    """Detect model version from config.json.
 
     Returns:
-        Tuple of (model_repo_or_path, is_quantized).
+        "2.3" for LTX-2.3, "2.0" for LTX-2.0.
+    """
+    config_file = model_path / "config.json"
+    if config_file.exists():
+        import json
+        with open(config_file) as f:
+            config = json.load(f)
+        version = config.get("model_version", "")
+        if version.startswith("2.3") or config.get("is_v2", False):
+            return "2.3"
+    return "2.0"
+
+
+def get_model_repo() -> tuple[str, bool, str]:
+    """Return the best available model, whether it's quantized, and its version.
+
+    Checks for local models in priority order: LTX-2.3, then LTX-2.0 int8/int4.
+    If no local model found, returns the default HF repo ID.
+
+    Returns:
+        Tuple of (model_repo_or_path, is_quantized, version).
+        version is "2.3" or "2.0".
     """
     for qpath in _QUANTIZED_PATHS:
         config_file = qpath / "config.json"
@@ -58,10 +77,16 @@ def get_model_repo() -> tuple[str, bool]:
         has_model = (qpath / "model.safetensors").exists() or (qpath / "transformer.safetensors").exists()
         if has_model and config_file.exists():
             quantized = _is_quantized_model(qpath)
-            log.info("Using %s model: %s", "quantized" if quantized else "local", qpath)
-            return str(qpath), quantized
+            version = _get_model_version(qpath)
+            log.info(
+                "Using %s model v%s: %s",
+                "quantized" if quantized else "local",
+                version,
+                qpath,
+            )
+            return str(qpath), quantized, version
     log.info("Using default model: %s", DEFAULT_MODEL_REPO)
-    return DEFAULT_MODEL_REPO, False
+    return DEFAULT_MODEL_REPO, False, "2.0"
 
 
 def get_venv_python() -> str:
@@ -222,12 +247,15 @@ async def run_mlx_generation(
         FileNotFoundError: If the venv Python binary cannot be found.
     """
     python_bin = venv_python or get_venv_python()
-    model_repo, is_quantized = get_model_repo()
+    model_repo, is_quantized, model_version = get_model_repo()
 
-    # Use quantized wrapper module for quantized models, otherwise standard mlx_video
-    if is_quantized:
+    # Route to appropriate generation module based on model version
+    if model_version == "2.3":
+        module = "engine.generate_v23"
+        log.info("Using LTX-2.3 vendored pipeline")
+    elif is_quantized:
         module = "engine.generate_av_quantized"
-        log.info("Using quantized inference wrapper")
+        log.info("Using quantized inference wrapper (LTX-2.0)")
     else:
         module = "mlx_video.generate_av"
 
@@ -263,23 +291,37 @@ async def run_mlx_generation(
         if progress_callback is not None:
             await progress_callback(0, 0, 0, 0.05)
 
-    cmd = [
-        python_bin,
-        "-m", module,
-        "--prompt", prompt,
-        "--height", str(height),
-        "--width", str(width),
-        "--num-frames", str(num_frames),
-        "--seed", str(seed),
-        "--fps", str(fps),
-        "--output-path", output_path,
-        "--model-repo", model_repo,
-        "--tiling", tiling,
-    ]
-
-    # Use 4-bit text encoder (only needed if not using precomputed embeddings)
-    if text_encoder_4bit and not embeddings_path:
-        cmd.extend(["--text-encoder-repo", text_encoder_4bit])
+    if model_version == "2.3":
+        # LTX-2.3 uses --model-dir instead of --model-repo
+        cmd = [
+            python_bin,
+            "-m", module,
+            "--prompt", prompt,
+            "--height", str(height),
+            "--width", str(width),
+            "--num-frames", str(num_frames),
+            "--seed", str(seed),
+            "--fps", str(fps),
+            "--output-path", output_path,
+            "--model-dir", model_repo,
+        ]
+    else:
+        cmd = [
+            python_bin,
+            "-m", module,
+            "--prompt", prompt,
+            "--height", str(height),
+            "--width", str(width),
+            "--num-frames", str(num_frames),
+            "--seed", str(seed),
+            "--fps", str(fps),
+            "--output-path", output_path,
+            "--model-repo", model_repo,
+            "--tiling", tiling,
+        ]
+        # Use 4-bit text encoder (only needed if not using precomputed embeddings)
+        if text_encoder_4bit and not embeddings_path:
+            cmd.extend(["--text-encoder-repo", text_encoder_4bit])
 
     if image is not None:
         cmd.extend(["--image", image, "--image-strength", str(image_strength)])

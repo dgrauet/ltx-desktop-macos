@@ -43,21 +43,27 @@ else
     echo -e "${GREEN}✓ huggingface-cli installed${NC}"
 fi
 
-# 3. Download LTX-2.3 distilled MLX model (~42GB)
-LTX_MODEL="notapalindrome/ltx2-mlx-av"
-LTX_CACHE_DIR="$HF_CACHE/models--notapalindrome--ltx2-mlx-av"
+# 3. Download LTX-2.3 official model (~43GB)
+# NOTE: This downloads the raw PyTorch checkpoint. To convert to MLX split format
+# with quantization, use: cd backend && uv run python ../scripts/convert_ltx23.py --quantize --bits 8
+LTX_MODEL="Lightricks/LTX-2.3"
+LTX_CACHE_DIR="$HF_CACHE/models--Lightricks--LTX-2.3"
+LTX_MLX_DIR="$HF_CACHE/ltx23-mlx"
 
 echo ""
-echo -e "${BLUE}[1/2] LTX-2.3 distilled MLX model${NC}"
+echo -e "${BLUE}[1/2] LTX-2.3 video generation model${NC}"
 echo -e "  Model: ${LTX_MODEL}"
-echo -e "  Size:  ~42GB"
+echo -e "  Size:  ~43GB (distilled checkpoint)"
 
-if [ -d "$LTX_CACHE_DIR" ] && [ -f "$LTX_CACHE_DIR/refs/main" ]; then
-    echo -e "${GREEN}✓ Already downloaded${NC}"
+if [ -d "$LTX_MLX_DIR" ] && [ -f "$LTX_MLX_DIR/transformer.safetensors" ]; then
+    echo -e "${GREEN}✓ Already converted to MLX format${NC}"
+elif [ -d "$LTX_CACHE_DIR" ] && [ -f "$LTX_CACHE_DIR/refs/main" ]; then
+    echo -e "${GREEN}✓ Already downloaded (run convert_ltx23.py to convert to MLX)${NC}"
 else
-    echo -e "${YELLOW}  Downloading (this may take a while)...${NC}"
-    $HF_CLI download "$LTX_MODEL"
-    echo -e "${GREEN}✓ LTX-2.3 model downloaded${NC}"
+    echo -e "${YELLOW}  Downloading distilled checkpoint (this may take a while)...${NC}"
+    $HF_CLI download "$LTX_MODEL" --include "ltx-2.3-22b-distilled.safetensors"
+    echo -e "${GREEN}✓ LTX-2.3 checkpoint downloaded${NC}"
+    echo -e "${YELLOW}  Next step: cd backend && uv run python ../scripts/convert_ltx23.py --quantize --bits 8${NC}"
 fi
 
 # 4. Download Qwen3.5-2B-4bit (MLX quantized) for prompt enhancement (~1.2GB)
@@ -85,9 +91,13 @@ echo -e "${BLUE}╚════════════════════�
 
 TOTAL_SIZE=0
 
-if [ -d "$LTX_CACHE_DIR" ]; then
+if [ -d "$LTX_MLX_DIR" ]; then
+    LTX_SIZE=$(du -sg "$LTX_MLX_DIR" 2>/dev/null | cut -f1 || echo "?")
+    echo -e "  LTX-2.3 (MLX): ${GREEN}${LTX_SIZE}GB${NC} — $LTX_MLX_DIR"
+    TOTAL_SIZE=$((TOTAL_SIZE + LTX_SIZE))
+elif [ -d "$LTX_CACHE_DIR" ]; then
     LTX_SIZE=$(du -sg "$LTX_CACHE_DIR" 2>/dev/null | cut -f1 || echo "?")
-    echo -e "  LTX-2.3:   ${GREEN}${LTX_SIZE}GB${NC} — $LTX_CACHE_DIR"
+    echo -e "  LTX-2.3 (raw): ${GREEN}${LTX_SIZE}GB${NC} — $LTX_CACHE_DIR"
     TOTAL_SIZE=$((TOTAL_SIZE + LTX_SIZE))
 else
     echo -e "  LTX-2.3:   ${RED}not found${NC}"
