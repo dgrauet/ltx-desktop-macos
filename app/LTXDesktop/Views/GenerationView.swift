@@ -170,6 +170,17 @@ struct GenerationView: View {
                     }
                 }
 
+                // Upscale toggle (full generation only, ignored for preview)
+                Toggle(isOn: $vm.upscale) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("2x Upscale")
+                            .font(.subheadline)
+                        Text("Full gen only — \(vm.selectedResolution.width * 2)x\(vm.selectedResolution.height * 2)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
                 Divider()
 
                 // Generate + Preview buttons
@@ -209,9 +220,16 @@ struct GenerationView: View {
                 if vm.isGenerating {
                     VStack(alignment: .leading, spacing: 4) {
                         ProgressView(value: vm.progress)
-                        Text("\(Int(vm.progress * 100))%")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        HStack(spacing: 0) {
+                            if let status = vm.statusMessage {
+                                Text("\(status) — ")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Text("\(Int(vm.progress * 100))%")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
 

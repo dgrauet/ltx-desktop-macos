@@ -175,17 +175,22 @@ def _encode_v2(args, model_path: Path) -> None:
         video_inner_dim=4096,
         audio_inner_dim=2048,
     )
+    from engine.ltx23_model.rope import LTXRopeType
     video_connector = Embeddings1DConnector(
         attention_head_dim=128,
         num_attention_heads=32,
         num_layers=8,
         apply_gated_attention=True,
+        positional_embedding_max_pos=[4096],
+        rope_type=LTXRopeType.SPLIT,
     )
     audio_connector = Embeddings1DConnector(
         attention_head_dim=64,
         num_attention_heads=32,
         num_layers=8,
         apply_gated_attention=True,
+        positional_embedding_max_pos=[4096],
+        rope_type=LTXRopeType.SPLIT,
     )
     text_encoder = AVTextEncoderV2(
         feature_extractor=feature_extractor,

@@ -411,6 +411,22 @@ def decode_video(
     return video
 
 
+def _find_ffmpeg() -> str:
+    """Find ffmpeg binary, checking common Homebrew paths."""
+    import shutil
+
+    path = shutil.which("ffmpeg")
+    if path:
+        return path
+    # Homebrew on Apple Silicon / Intel
+    for candidate in ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"]:
+        if Path(candidate).exists():
+            return candidate
+    raise FileNotFoundError(
+        "ffmpeg not found. Install with: brew install ffmpeg"
+    )
+
+
 def streaming_decode_to_ffmpeg(
     latent: mx.array,
     decoder: VideoDecoder,
@@ -432,6 +448,8 @@ def streaming_decode_to_ffmpeg(
     """
     import subprocess
 
+    ffmpeg_bin = _find_ffmpeg()
+
     if latent.ndim == 4:
         latent = latent[None]
 
@@ -441,10 +459,10 @@ def streaming_decode_to_ffmpeg(
     # Get dimensions
     b, c, num_frames, height, width = video.shape
 
-    log.info("Streaming %d frames (%dx%d) to ffmpeg", num_frames, width, height)
+    log.info("Streaming %d frames (%dx%d) to ffmpeg (%s)", num_frames, width, height, ffmpeg_bin)
 
     ffmpeg_cmd = [
-        "ffmpeg", "-y",
+        ffmpeg_bin, "-y",
         "-f", "rawvideo",
         "-vcodec", "rawvideo",
         "-s", f"{width}x{height}",
@@ -472,7 +490,8 @@ def streaming_decode_to_ffmpeg(
             frame = frame.astype(mx.uint8)
             frame = frame.transpose(1, 2, 0)  # (H, W, C)
 
-            # Write raw bytes
+            # Materialize before extracting bytes
+            _materialize(frame)
             frame_bytes = bytes(memoryview(frame))
             proc.stdin.write(frame_bytes)
 

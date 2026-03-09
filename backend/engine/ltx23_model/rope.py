@@ -188,21 +188,78 @@ def precompute_freqs_cis(
     num_attention_heads: int = 32,
     rope_type: LTXRopeType = LTXRopeType.INTERLEAVED,
 ) -> Tuple[mx.array, mx.array]:
-    """Precompute cosine and sine frequencies for RoPE."""
+    """Precompute cosine and sine frequencies for RoPE.
+
+    Uses float64 (numpy) for frequency computation to avoid precision loss,
+    matching the reference implementation's double-precision approach.
+    """
     if max_pos is None:
         max_pos = [20, 2048, 2048]
 
-    n_pos_dims = indices_grid.shape[1]
-    indices = generate_freq_grid(theta, n_pos_dims, dim)
-    freqs = generate_freqs(indices, indices_grid, max_pos, use_middle_indices_grid)
+    # Convert indices_grid to numpy float64 for high-precision computation
+    indices_grid_np = np.array(indices_grid.astype(mx.float32)).astype(np.float64)
+
+    n_pos_dims = indices_grid_np.shape[1]
+    n_elem = 2 * n_pos_dims
+
+    # Generate frequency grid in float64
+    log_start = math.log(1.0) / math.log(theta)
+    log_end = math.log(theta) / math.log(theta)
+    num_indices = dim // n_elem
+    lin_space = np.linspace(log_start, log_end, num_indices)
+    indices_np = np.power(theta, lin_space) * (math.pi / 2)
+
+    # Handle middle indices grid
+    if use_middle_indices_grid:
+        assert indices_grid_np.ndim == 4
+        assert indices_grid_np.shape[-1] == 2
+        indices_grid_np = (indices_grid_np[..., 0] + indices_grid_np[..., 1]) / 2.0
+    elif indices_grid_np.ndim == 4:
+        indices_grid_np = indices_grid_np[..., 0]
+
+    # Fractional positions in float64
+    fractional = np.zeros(
+        (indices_grid_np.shape[0], indices_grid_np.shape[2], n_pos_dims),
+        dtype=np.float64,
+    )
+    for i in range(n_pos_dims):
+        fractional[:, :, i] = indices_grid_np[:, i, :] / max_pos[i]
+
+    scaled = fractional * 2 - 1
+
+    # Outer product: (B, T, n_dims, 1) * (n_indices,) -> (B, T, n_dims, n_indices)
+    freqs = np.expand_dims(scaled, axis=-1) * indices_np.reshape(1, 1, 1, -1)
+    freqs = np.swapaxes(freqs, -1, -2)
+    freqs = freqs.reshape(freqs.shape[:-2] + (-1,))
+
+    # Cos/sin in float64
+    cos_freq = np.cos(freqs)
+    sin_freq = np.sin(freqs)
 
     if rope_type == LTXRopeType.SPLIT:
         expected_freqs = dim // 2
-        current_freqs = freqs.shape[-1]
+        current_freqs = cos_freq.shape[-1]
         pad_size = expected_freqs - current_freqs
-        cos_freq, sin_freq = split_freqs_cis(freqs, pad_size, num_attention_heads)
+        if pad_size > 0:
+            cos_padding = np.ones((*cos_freq.shape[:-1], pad_size), dtype=np.float64)
+            sin_padding = np.zeros((*sin_freq.shape[:-1], pad_size), dtype=np.float64)
+            cos_freq = np.concatenate([cos_padding, cos_freq], axis=-1)
+            sin_freq = np.concatenate([sin_padding, sin_freq], axis=-1)
+        b, t = cos_freq.shape[0], cos_freq.shape[1]
+        cos_freq = cos_freq.reshape(b, t, num_attention_heads, -1)
+        sin_freq = sin_freq.reshape(b, t, num_attention_heads, -1)
+        cos_freq = np.swapaxes(cos_freq, 1, 2)
+        sin_freq = np.swapaxes(sin_freq, 1, 2)
     else:
-        n_elem = 2 * n_pos_dims
-        cos_freq, sin_freq = interleaved_freqs_cis(freqs, dim % n_elem)
+        cos_freq = np.repeat(cos_freq, 2, axis=-1)
+        sin_freq = np.repeat(sin_freq, 2, axis=-1)
+        pad_size = dim % n_elem
+        if pad_size > 0:
+            cos_padding = np.ones((*cos_freq.shape[:-1], pad_size), dtype=np.float64)
+            sin_padding = np.zeros((*sin_freq.shape[:-1], pad_size), dtype=np.float64)
+            cos_freq = np.concatenate([cos_padding, cos_freq], axis=-1)
+            sin_freq = np.concatenate([sin_padding, sin_freq], axis=-1)
 
-    return cos_freq.astype(out_dtype), sin_freq.astype(out_dtype)
+    # Convert to MLX float32
+    return mx.array(cos_freq.astype(np.float32)).astype(out_dtype), \
+           mx.array(sin_freq.astype(np.float32)).astype(out_dtype)

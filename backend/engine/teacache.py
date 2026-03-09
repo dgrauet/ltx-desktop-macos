@@ -1,188 +1,159 @@
-"""TeaCache — Training-free block-output caching for DiT models on MLX.
+"""TeaCache — block-level output caching for diffusion transformers.
 
-Ports the TeaCache algorithm (ali-vilab/TeaCache) to MLX for Apple Silicon.
-Instead of recomputing every transformer block at every denoising step,
-TeaCache uses timestep embedding differences to estimate whether a block's
-output has changed enough to warrant recomputation. If the change is below
-a threshold, the cached output from the previous step is reused.
+Caches the cumulative residual of all transformer blocks between
+consecutive denoising steps. When timestep-to-timestep change is below
+threshold, reuses cached residual instead of running 48 expensive blocks.
 
-This yields 1.6-2.1x inference speedup on LTX-Video with negligible quality loss.
-
-References:
-- Paper: "Timestep Embedding Tells: It's Time to Cache for Video Diffusion Model"
-- LTX-Video specific: https://github.com/ali-vilab/TeaCache/tree/main/TeaCache4LTX-Video
-- License: Apache 2.0
+Reference: https://github.com/ali-vilab/TeaCache/tree/main/TeaCache4LTX-Video
 """
 
-from __future__ import annotations
-
 import logging
-import time
-from dataclasses import dataclass, field
+from typing import Optional
+
+import mlx.core as mx
+import numpy as np
 
 log = logging.getLogger(__name__)
 
-# MLX import with graceful fallback
-try:
-    import mlx.core as mx
-    _MLX_AVAILABLE = True
-except ImportError:
-    _MLX_AVAILABLE = False
-
-
-@dataclass
-class TeaCacheStats:
-    """Statistics from a TeaCache-enabled denoising run."""
-
-    total_blocks: int = 0
-    blocks_computed: int = 0
-    blocks_cached: int = 0
-    cache_hit_rate: float = 0.0
-    estimated_speedup: float = 1.0
-    elapsed_seconds: float = 0.0
+# Rescale polynomial coefficients fitted to LTX-Video block dynamics
+_RESCALE_COEFFS = [2.14700694e+01, -1.28016453e+01, 2.31279151e+00, 7.92487521e-01, 9.69274326e-03]
 
 
 class TeaCacheMLX:
-    """Training-free block-output caching for DiT models on MLX.
+    """Block-level residual caching for MLX diffusion transformers.
 
-    Caches entire transformer block outputs (not KV matrices) and reuses
-    them when the timestep embedding change is below a threshold.
+    Caches the cumulative residual (output - input) of ALL transformer blocks
+    between consecutive denoising steps. When the modulated input hasn't changed
+    much (measured by relative L1 distance, rescaled through a polynomial fitted
+    to LTX-Video dynamics), the cached residual is reused instead of running
+    all 48 blocks.
 
     Args:
-        rel_l1_thresh: Relative L1 threshold for cache invalidation.
+        rel_l1_thresh: Accumulated rescaled distance threshold for cache
+            invalidation.
             - 0.0: disabled (always recompute)
             - 0.03: near-lossless (recommended for production)
-            - 0.05: minimal degradation (good for rapid iteration)
+            - 0.05: minimal degradation (good for rapid preview)
             - 0.08+: visible quality loss
-        num_layers: Number of transformer layers to cache.
     """
 
-    def __init__(self, rel_l1_thresh: float = 0.03, num_layers: int = 32) -> None:
-        self.thresh = rel_l1_thresh
-        self.num_layers = num_layers
-        self._cache: dict[int, object] = {}
-        self._prev_t_emb: object | None = None
-        self._stats = TeaCacheStats()
-        self._start_time: float = 0.0
+    def __init__(self, rel_l1_thresh: float = 0.03) -> None:
+        self.rel_l1_thresh = rel_l1_thresh
+        self._rescale_func = np.poly1d(_RESCALE_COEFFS)
+        self._accumulated_distance: float = 0.0
+        self._prev_modulated_input: Optional[mx.array] = None
+        self._cached_video_residual: Optional[mx.array] = None
+        self._cached_audio_residual: Optional[mx.array] = None
+        self._cache_hits: int = 0
+        self._cache_misses: int = 0
 
-    @property
-    def enabled(self) -> bool:
-        """Whether caching is active (thresh > 0)."""
-        return self.thresh > 0.0
+    def should_skip_blocks(
+        self, modulated_input: mx.array, step_idx: int, total_steps: int
+    ) -> bool:
+        """Decide whether to skip transformer blocks using cached residual.
 
-    def reset(self) -> None:
-        """Clear all cached block outputs. Call between generations."""
-        self._cache.clear()
-        self._prev_t_emb = None
-        self._stats = TeaCacheStats()
-        self._start_time = time.monotonic()
-
-    def should_recompute(self, t_emb: object, layer_idx: int) -> bool:
-        """Estimate if a block's output changed enough to warrant recomputation.
-
-        Uses the L1 difference of timestep embeddings as a cheap proxy
-        for block output change.
+        Always computes on first and last step. For middle steps, compares
+        current modulated input to previous via relative L1 distance,
+        rescales through polynomial, and accumulates distance.
 
         Args:
-            t_emb: Current timestep embedding tensor.
-            layer_idx: Index of the transformer layer.
+            modulated_input: The video hidden state after patchify+AdaLN
+                (i.e. video_args.x after preprocessing), used as the
+                change-detection signal.
+            step_idx: Current denoising step index (0-based).
+            total_steps: Total number of denoising steps.
 
         Returns:
-            True if the block should be recomputed, False if cached output can be reused.
+            True if cached residual should be used (skip blocks),
+            False if blocks must be recomputed.
         """
-        self._stats.total_blocks += 1
-
-        if self._prev_t_emb is None or layer_idx not in self._cache:
-            self._stats.blocks_computed += 1
-            return True
-
-        if not _MLX_AVAILABLE:
-            self._stats.blocks_computed += 1
-            return True
-
-        # Cheap L1 difference on timestep embeddings
-        diff = mx.mean(mx.abs(mx.subtract(t_emb, self._prev_t_emb))).item()
-
-        if diff > self.thresh:
-            self._stats.blocks_computed += 1
-            return True
-        else:
-            self._stats.blocks_cached += 1
+        # Always compute first and last step
+        if step_idx == 0 or step_idx == total_steps - 1:
+            self._prev_modulated_input = modulated_input
+            self._accumulated_distance = 0.0
             return False
 
-    def get_or_compute(
+        # No previous input to compare against
+        if self._prev_modulated_input is None:
+            self._prev_modulated_input = modulated_input
+            return False
+
+        # Compute relative L1 distance
+        diff = mx.abs(modulated_input - self._prev_modulated_input)
+        mean_diff = float(mx.mean(diff).item())
+        mean_prev = float(mx.mean(mx.abs(self._prev_modulated_input)).item())
+        rel_l1 = mean_diff / max(mean_prev, 1e-8)
+
+        # Rescale through polynomial fitted to LTX-Video dynamics
+        rescaled = float(self._rescale_func(rel_l1))
+
+        # Accumulate distance
+        self._accumulated_distance += rescaled
+
+        # Update previous input
+        self._prev_modulated_input = modulated_input
+
+        # If accumulated distance exceeds threshold, must recompute
+        if self._accumulated_distance >= self.rel_l1_thresh or self._cached_video_residual is None:
+            self._accumulated_distance = 0.0
+            self._cache_misses += 1
+            return False
+
+        self._cache_hits += 1
+        return True
+
+    def store_residuals(
         self,
-        block_fn: object,
-        x: object,
-        t_emb: object,
-        layer_idx: int,
-        **kwargs: object,
-    ) -> object:
-        """Either compute a block's output or return cached result.
+        video_input: mx.array,
+        video_output: mx.array,
+        audio_input: Optional[mx.array] = None,
+        audio_output: Optional[mx.array] = None,
+    ) -> None:
+        """Store residuals (output - input) for future reuse.
 
         Args:
-            block_fn: The transformer block's forward function.
-            x: Input tensor to the block.
-            t_emb: Timestep embedding tensor.
-            layer_idx: Index of this transformer layer.
-            **kwargs: Additional arguments to pass to block_fn.
-
-        Returns:
-            Block output tensor (either freshly computed or cached).
+            video_input: Video hidden state before transformer blocks.
+            video_output: Video hidden state after transformer blocks.
+            audio_input: Audio hidden state before transformer blocks (if audio enabled).
+            audio_output: Audio hidden state after transformer blocks (if audio enabled).
         """
-        if not self.enabled:
-            return block_fn(x, t_emb, **kwargs)
+        self._cached_video_residual = video_output - video_input
+        if audio_input is not None and audio_output is not None:
+            self._cached_audio_residual = audio_output - audio_input
 
-        if self.should_recompute(t_emb, layer_idx):
-            output = block_fn(x, t_emb, **kwargs)
-            self._cache[layer_idx] = output
-            return output
-        else:
-            return self._cache[layer_idx]
-
-    def step_done(self, t_emb: object) -> None:
-        """Mark the end of a denoising step. Updates the cached timestep embedding.
+    def apply_cached_residual(
+        self, video_input: mx.array, audio_input: Optional[mx.array] = None
+    ) -> tuple[mx.array, Optional[mx.array]]:
+        """Apply cached residual to current input.
 
         Args:
-            t_emb: The timestep embedding from the just-completed step.
-        """
-        self._prev_t_emb = t_emb
-
-    def get_stats(self) -> TeaCacheStats:
-        """Return statistics from this caching run.
+            video_input: Current video hidden state.
+            audio_input: Current audio hidden state (if audio enabled).
 
         Returns:
-            TeaCacheStats with hit rate and estimated speedup.
+            Tuple of (video_output, audio_output). audio_output is None
+            if no audio residual is cached.
         """
-        stats = self._stats
-        if stats.total_blocks > 0:
-            stats.cache_hit_rate = stats.blocks_cached / stats.total_blocks
-            # Rough speedup estimate: each cached block saves ~95% of its compute
-            compute_ratio = stats.blocks_computed / stats.total_blocks
-            stats.estimated_speedup = 1.0 / max(compute_ratio, 0.1)
-        stats.elapsed_seconds = time.monotonic() - self._start_time
-        return stats
+        video_out = video_input + self._cached_video_residual
+        audio_out = None
+        if audio_input is not None and self._cached_audio_residual is not None:
+            audio_out = audio_input + self._cached_audio_residual
+        return video_out, audio_out
 
+    def reset(self) -> None:
+        """Reset state between generations."""
+        self._accumulated_distance = 0.0
+        self._prev_modulated_input = None
+        self._cached_video_residual = None
+        self._cached_audio_residual = None
+        self._cache_hits = 0
+        self._cache_misses = 0
 
-def create_teacache(
-    enabled: bool = True,
-    rel_l1_thresh: float = 0.03,
-    num_layers: int = 32,
-) -> TeaCacheMLX:
-    """Factory function to create a TeaCache instance.
-
-    Args:
-        enabled: Whether to enable caching. If False, thresh is set to 0.
-        rel_l1_thresh: Relative L1 threshold (0.03 = near-lossless).
-        num_layers: Number of transformer layers in the model.
-
-    Returns:
-        Configured TeaCacheMLX instance.
-    """
-    thresh = rel_l1_thresh if enabled else 0.0
-    cache = TeaCacheMLX(rel_l1_thresh=thresh, num_layers=num_layers)
-    log.info(
-        "TeaCache created: enabled=%s, thresh=%.3f, layers=%d",
-        enabled, thresh, num_layers,
-    )
-    return cache
+    @property
+    def stats(self) -> str:
+        """Human-readable cache statistics."""
+        total = self._cache_hits + self._cache_misses
+        if total == 0:
+            return "TeaCache: no steps processed"
+        hit_pct = self._cache_hits / total * 100
+        return f"TeaCache: {self._cache_hits}/{total} steps cached ({hit_pct:.0f}%)"

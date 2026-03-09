@@ -170,6 +170,10 @@ def load_ltx23_transformer(
     model = create_model_from_config(config, low_memory=low_memory)
     model = load_transformer_weights(model, model_dir)
 
+    # NOTE: mx.compile() disabled — subprocess-per-generation means tracing
+    # overhead is paid every invocation and compiled kernels are lost on exit.
+    # Would only help with a persistent model server architecture.
+
     if as_x0:
         return X0Model(model)
     return model

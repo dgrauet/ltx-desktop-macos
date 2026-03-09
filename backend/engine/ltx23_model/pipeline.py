@@ -22,8 +22,14 @@ from .patchifier import (
 
 log = logging.getLogger(__name__)
 
-# Predefined sigmas for distilled pipeline (8 steps)
-DISTILLED_SIGMAS = [1.0, 0.94, 0.82, 0.64, 0.44, 0.27, 0.13, 0.03]
+# Predefined sigmas for distilled pipeline (8 steps + final 0.0)
+# From reference mlx_video implementation: fine steps early (detail preservation),
+# aggressive denoising in mid-range.
+DISTILLED_SIGMAS = [1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0]
+
+# Stage 2 sigmas for two-stage upscale refinement (3 steps).
+# Matches reference mlx_video implementation.
+STAGE_2_SIGMAS = [0.909375, 0.725, 0.421875, 0.0]
 
 
 def aggressive_cleanup() -> None:
@@ -59,6 +65,11 @@ class GenerationConfig:
     image_frame_idx: int = 0
     image_strength: float = 0.85
 
+    # Two-stage refinement: upscaled latent from Stage 1 to refine in Stage 2
+    initial_latent: Optional[mx.array] = None
+    # Audio latent from Stage 1 (partially noised for Stage 2)
+    initial_audio_latent: Optional[mx.array] = None
+
     # Memory
     low_memory: bool = True
 
@@ -67,7 +78,7 @@ class GenerationConfig:
 class GenerationOutput:
     """Output from the generation pipeline."""
     video_latent: mx.array  # Shape: [B, C, F, H, W] in latent space
-    audio_latent: Optional[mx.array] = None  # Shape: [B, C, T] in latent space
+    audio_latent: Optional[mx.array] = None  # Shape: [B, 8, T, 16] in latent space
 
 
 def _create_denoise_mask(
@@ -153,17 +164,39 @@ def generate(
         f"(from {config.height}×{config.width}, {config.num_frames} frames)"
     )
 
-    # Initialize noise
+    # Initialize latent
     mx.random.seed(config.seed)
-    latent = mx.random.normal(latent_shape.to_tuple())
 
-    # Create denoise mask
+    # Create denoise mask (needed for both Stage 1 and Stage 2 with I2V)
     denoise_mask = _create_denoise_mask(
         latent_shape,
         image_latent=config.image_latent,
         image_frame_idx=config.image_frame_idx,
         image_strength=config.image_strength,
     )
+
+    if config.initial_latent is not None:
+        # Stage 2 refinement: blend upscaled latent with noise at sigma_start
+        sigmas = config.sigmas or DISTILLED_SIGMAS
+        sigma_start = sigmas[0]
+        noise = mx.random.normal(latent_shape.to_tuple())
+
+        if config.image_latent is not None:
+            # Stage 2 I2V: use denoise_mask for per-frame noise scaling
+            # Conditioned frame (mask < 1) keeps more of the upscaled latent
+            scaled_mask = denoise_mask * sigma_start
+            latent = noise * scaled_mask + config.initial_latent * (1.0 - scaled_mask)
+            log.info(
+                f"Stage 2 I2V: blending with per-frame mask at sigma={sigma_start:.4f}"
+            )
+        else:
+            # Stage 2 T2V: uniform blending across all frames
+            latent = config.initial_latent * (1.0 - sigma_start) + noise * sigma_start
+            log.info(
+                f"Stage 2 T2V: blending initial_latent with noise at sigma={sigma_start:.4f}"
+            )
+    else:
+        latent = mx.random.normal(latent_shape.to_tuple())
 
     # Apply image conditioning if provided
     clean_latent = mx.zeros_like(latent)
@@ -173,8 +206,9 @@ def generate(
         img_np = np.array(config.image_latent)
         clean_np[:, :, config.image_frame_idx, :, :] = img_np[:, :, 0, :, :]
         clean_latent = mx.array(clean_np)
-        # Mix: latent = clean * (1 - mask) + noise * mask (at sigma=1)
-        latent = clean_latent * (1.0 - denoise_mask) + latent * denoise_mask
+        if config.initial_latent is None:
+            # Stage 1: Mix latent = clean * (1 - mask) + noise * mask (at sigma=1)
+            latent = clean_latent * (1.0 - denoise_mask) + latent * denoise_mask
 
     # Compute positions
     grid_bounds = patchifier.get_patch_grid_bounds(latent_shape)
@@ -184,35 +218,57 @@ def generate(
     pixel_coords_np[:, 0, :, :] = pixel_coords_np[:, 0, :, :] / config.fps
     positions = mx.array(pixel_coords_np)
 
-    # Sigmas
+    # Sigmas: N+1 values for N steps (last value is the terminal sigma)
     sigmas = config.sigmas or DISTILLED_SIGMAS
-    if len(sigmas) > config.num_steps:
-        sigmas = sigmas[: config.num_steps]
 
     # Audio setup
+    # Constants matching reference mlx_video implementation
+    AUDIO_SAMPLE_RATE = 16000
+    AUDIO_HOP_LENGTH = 160
+    AUDIO_DOWNSAMPLE_FACTOR = 4
+    AUDIO_LATENT_CHANNELS = 8
+    AUDIO_MEL_BINS = 16
+    AUDIO_LATENTS_PER_SECOND = AUDIO_SAMPLE_RATE / AUDIO_HOP_LENGTH / AUDIO_DOWNSAMPLE_FACTOR  # 25.0
+
     audio_latent = None
     audio_positions = None
     if config.generate_audio and config.audio_prompt_embeds is not None:
-        # Compute audio latent shape (1D temporal)
-        audio_duration_s = (config.num_frames - 1) / config.fps
-        audio_sr = 44100  # LTX-2.3 audio sample rate
-        audio_latent_len = int(audio_duration_s * audio_sr / 2048)  # Audio VAE compression
-        audio_latent = mx.random.normal((1, 128, audio_latent_len))
+        # Compute audio latent length from video duration
+        audio_duration_s = config.num_frames / config.fps
+        audio_latent_len = round(audio_duration_s * AUDIO_LATENTS_PER_SECOND)
 
-        # Audio positions: temporal only
-        audio_bounds = np.zeros((1, 1, audio_latent_len, 2), dtype=np.float32)
-        for i in range(audio_latent_len):
-            audio_bounds[0, 0, i, 0] = i * 2048 / audio_sr
-            audio_bounds[0, 0, i, 1] = (i + 1) * 2048 / audio_sr
-        audio_positions = mx.array(audio_bounds)
+        # Audio latent: 4D (B, C, T, F) matching reference — 8 channels × 16 mel bins = 128
+        if config.initial_audio_latent is not None:
+            # Stage 2: blend Stage 1 audio with noise at sigma_start
+            sigmas_for_audio = config.sigmas or DISTILLED_SIGMAS
+            sigma_start = sigmas_for_audio[0]
+            audio_noise = mx.random.normal((1, AUDIO_LATENT_CHANNELS, audio_latent_len, AUDIO_MEL_BINS))
+            audio_latent = config.initial_audio_latent * (1.0 - sigma_start) + audio_noise * sigma_start
+            log.info(f"Stage 2 audio: blending with noise at sigma={sigma_start:.4f}")
+        else:
+            audio_latent = mx.random.normal((1, AUDIO_LATENT_CHANNELS, audio_latent_len, AUDIO_MEL_BINS))
 
-    log.info(f"Starting denoising: {len(sigmas)} steps, sigmas={sigmas}")
+        # Audio position grid with causal alignment (matches create_audio_position_grid)
+        def _audio_latent_time_in_sec(start_idx: int, end_idx: int) -> np.ndarray:
+            latent_frame = np.arange(start_idx, end_idx, dtype=np.float32)
+            mel_frame = latent_frame * AUDIO_DOWNSAMPLE_FACTOR
+            mel_frame = np.clip(mel_frame + 1 - AUDIO_DOWNSAMPLE_FACTOR, 0, None)
+            return mel_frame * AUDIO_HOP_LENGTH / AUDIO_SAMPLE_RATE
+
+        start_times = _audio_latent_time_in_sec(0, audio_latent_len)
+        end_times = _audio_latent_time_in_sec(1, audio_latent_len + 1)
+        audio_bounds = np.stack([start_times, end_times], axis=-1)  # (T, 2)
+        audio_bounds = audio_bounds[np.newaxis, np.newaxis, :, :]  # (1, 1, T, 2)
+        audio_positions = mx.array(audio_bounds, dtype=mx.float32)
+
+    num_steps = len(sigmas) - 1  # N+1 sigma values → N steps
+    log.info(f"Starting denoising: {num_steps} steps, sigmas={sigmas}")
 
     # Denoising loop
     force_materialize = mx.eval
-    for step_idx in range(len(sigmas)):
+    for step_idx in range(num_steps):
         sigma = sigmas[step_idx]
-        sigma_next = sigmas[step_idx + 1] if step_idx + 1 < len(sigmas) else 0.0
+        sigma_next = sigmas[step_idx + 1]
 
         # Compute per-token timesteps: sigma * denoise_mask
         timesteps_5d = denoise_mask * sigma
@@ -234,8 +290,11 @@ def generate(
         # Create audio modality (if generating audio)
         audio_mod = None
         if audio_latent is not None and config.audio_prompt_embeds is not None:
-            audio_patches = audio_latent.transpose(0, 2, 1)  # [B, T, C]
-            audio_timesteps = mx.full((1, audio_patches.shape[1]), sigma)
+            # Flatten 4D (B, C, T, F) → (B, T, C*F) for transformer
+            ab, ac, at, af = audio_latent.shape
+            audio_patches = audio_latent.transpose(0, 2, 1, 3)  # (B, T, C, F)
+            audio_patches = audio_patches.reshape(ab, at, ac * af)  # (B, T, 128)
+            audio_timesteps = mx.full((1, at), sigma)
             audio_mod = Modality(
                 latent=audio_patches,
                 context=config.audio_prompt_embeds,
@@ -245,6 +304,10 @@ def generate(
                 enabled=True,
                 sigma=mx.array([sigma]),
             )
+
+        # Pass step info for TeaCache
+        if hasattr(model, "set_step_info"):
+            model.set_step_info(step_idx, len(sigmas))
 
         # Model forward pass
         if is_x0:
@@ -274,7 +337,9 @@ def generate(
 
         # Audio euler step
         if audio_x0_patches is not None:
-            audio_x0 = audio_x0_patches.transpose(0, 2, 1)  # [B, C, T]
+            # Unflatten (B, T, C*F) → (B, C, T, F)
+            audio_x0 = audio_x0_patches.reshape(ab, at, AUDIO_LATENT_CHANNELS, AUDIO_MEL_BINS)
+            audio_x0 = audio_x0.transpose(0, 2, 1, 3)  # (B, C, T, F)
             if sigma_next > 0:
                 audio_latent = _euler_step(audio_latent, audio_x0, sigma, sigma_next)
             else:
@@ -287,9 +352,9 @@ def generate(
 
         # Progress callback
         if progress_callback is not None:
-            progress_callback(step_idx + 1, len(sigmas), latent)
+            progress_callback(step_idx + 1, num_steps, latent)
 
-        log.info(f"Step {step_idx + 1}/{len(sigmas)}: sigma={sigma:.3f} → {sigma_next:.3f}")
+        log.info(f"Step {step_idx + 1}/{num_steps}: sigma={sigma:.3f} → {sigma_next:.3f}")
 
     aggressive_cleanup()
 

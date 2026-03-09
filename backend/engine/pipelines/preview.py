@@ -46,6 +46,7 @@ class PreviewPipeline:
         num_frames: int = 9,
         image: str | None = None,
         image_strength: float = 1.0,
+        upscale: bool = False,
         progress_callback: Callable[[int, int, float, str | None], None] | None = None,
     ) -> GenerationResult:
         """Run the rapid preview pipeline.
@@ -67,11 +68,12 @@ class PreviewPipeline:
         start_time = time.monotonic()
 
         async def _notify(
-            step: int, total: int, pct: float, frame: str | None = None
+            step: int, total: int, pct: float, frame: str | None = None,
+            *, status: str | None = None
         ) -> None:
             if not progress_callback:
                 return
-            result = progress_callback(step, total, pct, frame)
+            result = progress_callback(step, total, pct, frame, status=status)
             if inspect.isawaitable(result):
                 await result
 
@@ -83,9 +85,10 @@ class PreviewPipeline:
 
         # Adapt mlx_runner progress to pipeline progress_callback format
         async def _progress_adapter(
-            step: int, total_steps: int, stage: int, pct: float
+            step: int, total_steps: int, stage: int, pct: float,
+            *, status: str | None = None
         ) -> None:
-            await _notify(step, total_steps, pct, None)
+            await _notify(step, total_steps, pct, None, status=status)
 
         # Run MLX inference with preview settings (small resolution, few frames)
         mode = "I2V" if image else "T2V"
@@ -103,6 +106,7 @@ class PreviewPipeline:
             image=image,
             image_strength=image_strength,
             tiling="aggressive",
+            upscale=False,  # Never upscale previews — low-res by design
             progress_callback=_progress_adapter,
         )
 

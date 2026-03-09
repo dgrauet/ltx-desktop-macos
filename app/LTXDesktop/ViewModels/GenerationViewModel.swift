@@ -9,7 +9,7 @@ class GenerationViewModel: ObservableObject {
     @Published var numFrames = 97
     @Published var steps = 8
     @Published var fps = 24
-    @Published var seed = 42
+    @Published var seed = -1
     @Published var isGenerating = false
     @Published var progress: Double = 0
     @Published var errorMessage: String?
@@ -19,6 +19,8 @@ class GenerationViewModel: ObservableObject {
     @Published var sourceImageData: Data?
     @Published var isEnhancing: Bool = false
     @Published var imageStrength: Double = 0.85
+    @Published var upscale: Bool = false
+    @Published var statusMessage: String?
 
     enum Resolution: String, CaseIterable, Identifiable {
         case landscape768 = "768x512"
@@ -62,6 +64,7 @@ class GenerationViewModel: ObservableObject {
         errorMessage = nil
         outputVideoURL = nil
         progressiveFrame = nil
+        statusMessage = nil
 
         do {
             let jobResponse: JobResponse
@@ -76,7 +79,8 @@ class GenerationViewModel: ObservableObject {
                     steps: steps,
                     seed: seed,
                     fps: fps,
-                    imageStrength: imageStrength
+                    imageStrength: imageStrength,
+                    upscale: upscale
                 )
                 jobResponse = try await service.generateImageToVideo(request: request)
             } else {
@@ -87,7 +91,8 @@ class GenerationViewModel: ObservableObject {
                     numFrames: numFrames,
                     steps: steps,
                     seed: seed,
-                    fps: fps
+                    fps: fps,
+                    upscale: upscale
                 )
                 jobResponse = try await service.generateTextToVideo(request: request)
             }
@@ -97,6 +102,9 @@ class GenerationViewModel: ObservableObject {
             for await update in service.connectProgress(jobId: jobId) {
                 if let pct = update.pct {
                     progress = pct
+                }
+                if let newStatus = update.status {
+                    statusMessage = newStatus
                 }
                 if let frameB64 = update.previewFrame,
                    let frameData = Data(base64Encoded: frameB64) {
@@ -125,6 +133,7 @@ class GenerationViewModel: ObservableObject {
         }
 
         isGenerating = false
+        statusMessage = nil
     }
 
     func generatePreview(using service: BackendService) async {
@@ -135,12 +144,14 @@ class GenerationViewModel: ObservableObject {
         errorMessage = nil
         outputVideoURL = nil
         progressiveFrame = nil
+        statusMessage = nil
 
         let request = PreviewRequest(
             prompt: prompt,
             seed: seed,
             sourceImagePath: sourceImagePath,
-            imageStrength: imageStrength
+            imageStrength: imageStrength,
+            upscale: upscale
         )
 
         do {
@@ -150,6 +161,9 @@ class GenerationViewModel: ObservableObject {
             for await update in service.connectProgress(jobId: jobId) {
                 if let pct = update.pct {
                     progress = pct
+                }
+                if let newStatus = update.status {
+                    statusMessage = newStatus
                 }
                 if let error = update.error {
                     errorMessage = error
@@ -173,6 +187,7 @@ class GenerationViewModel: ObservableObject {
         }
 
         isGenerating = false
+        statusMessage = nil
     }
 
     func enhancePrompt(using service: BackendService) async {

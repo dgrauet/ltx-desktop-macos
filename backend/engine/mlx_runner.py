@@ -32,9 +32,16 @@ _STAGE_RE = re.compile(r"^STAGE:(\d+):STEP:(\d+):(\d+)")
 _STATUS_RE = re.compile(r"^STATUS:(.+)")
 
 # Progress mapping — maps (stage, step/total) to overall 0.0-1.0 range
+# When two-stage is active, Stage 1 gets 0.05-0.55, Stage 2 gets 0.65-0.80
+# When single-stage, Stage 1 gets 0.05-0.85 (same as before)
 _STAGE_RANGES: dict[int, tuple[float, float]] = {
-    1: (0.05, 0.50),  # Stage 1 denoising
-    2: (0.50, 0.85),  # Stage 2 denoising
+    1: (0.05, 0.55),  # Stage 1 denoising (half res)
+    2: (0.65, 0.80),  # Stage 2 refinement (target res)
+}
+
+# Fallback for single-stage (no stage 2 progress lines emitted)
+_SINGLE_STAGE_RANGES: dict[int, tuple[float, float]] = {
+    1: (0.05, 0.85),
 }
 
 
@@ -131,19 +138,73 @@ def _get_text_encoder_4bit() -> str | None:
     return "mlx-community/gemma-3-12b-it-4bit"
 
 
-def _compute_progress(stage: int, step: int, total: int) -> float:
+
+def _get_upscaler_weights() -> str | None:
+    """Find or download the LTX-2.3 spatial upscaler weights.
+
+    Searches local HuggingFace cache for the upscaler safetensors file.
+    Falls back to downloading from HuggingFace if not found locally.
+
+    Returns:
+        Path to the upscaler weights file, or None if unavailable.
+    """
+    cache_root = Path.home() / ".cache" / "huggingface" / "hub"
+
+    # Check LTX-2.3 repo first
+    for repo_name in ["models--Lightricks--LTX-2.3", "models--Lightricks--LTX-2"]:
+        repo_dir = cache_root / repo_name / "snapshots"
+        if not repo_dir.exists():
+            continue
+        for snapshot in sorted(repo_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+            for fname in [
+                "ltx-2.3-spatial-upscaler-x2-1.0.safetensors",
+                "ltx-2-spatial-upscaler-x2-1.0.safetensors",
+            ]:
+                candidate = snapshot / fname
+                if candidate.exists():
+                    log.info("Found upscaler weights: %s", candidate)
+                    return str(candidate)
+
+    # Not cached locally — try downloading
+    try:
+        from huggingface_hub import hf_hub_download
+
+        log.info("Downloading upscaler weights from Lightricks/LTX-2.3...")
+        path = hf_hub_download(
+            repo_id="Lightricks/LTX-2.3",
+            filename="ltx-2.3-spatial-upscaler-x2-1.0.safetensors",
+        )
+        log.info("Downloaded upscaler weights: %s", path)
+        return path
+    except Exception:
+        # Try LTX-2 as fallback
+        try:
+            path = hf_hub_download(
+                repo_id="Lightricks/LTX-2",
+                filename="ltx-2-spatial-upscaler-x2-1.0.safetensors",
+            )
+            log.info("Downloaded upscaler weights (LTX-2): %s", path)
+            return path
+        except Exception as e:
+            log.warning("Could not find or download upscaler weights: %s", e)
+            return None
+
+
+def _compute_progress(stage: int, step: int, total: int, is_two_stage: bool = False) -> float:
     """Compute overall progress percentage from stage/step info.
 
     Args:
         stage: Current stage number (1 or 2).
         step: Current step within the stage.
         total: Total steps in the stage.
+        is_two_stage: If True, use two-stage progress ranges.
 
     Returns:
         Overall progress as a float between 0.0 and 1.0.
     """
-    if stage in _STAGE_RANGES:
-        lo, hi = _STAGE_RANGES[stage]
+    ranges = _STAGE_RANGES if is_two_stage else _SINGLE_STAGE_RANGES
+    if stage in ranges:
+        lo, hi = ranges[stage]
         frac = step / max(total, 1)
         return lo + frac * (hi - lo)
     # Unknown stage — return rough estimate
@@ -215,7 +276,8 @@ async def run_mlx_generation(
     image: str | None = None,
     image_strength: float = 1.0,
     tiling: str = "auto",
-    progress_callback: Callable[[int, int, int, float], Awaitable[None]] | None = None,
+    upscale: bool = False,
+    progress_callback: Callable[..., Awaitable[None]] | None = None,
     venv_python: str | None = None,
 ) -> str:
     """Run MLX video generation as an async subprocess.
@@ -223,6 +285,10 @@ async def run_mlx_generation(
     For quantized models on 32GB machines, text encoding runs in a separate
     subprocess first. The embeddings are saved to a temp file and passed to
     the generation subprocess via the LTX_PRECOMPUTED_EMBEDDINGS env var.
+
+    When upscale is True and running v2.3, the two-stage neural upscale
+    pipeline is used: generate at half resolution, upscale latent 2x with
+    the learned LatentUpsampler, then refine at target resolution.
 
     Args:
         prompt: Text prompt describing the video to generate.
@@ -235,8 +301,11 @@ async def run_mlx_generation(
         image: Optional path to a reference image for I2V generation.
         image_strength: Strength of image conditioning (0.0-1.0).
         tiling: Tiling mode (``"auto"``, ``"on"``, ``"off"``).
+        upscale: If True, use two-stage neural upscale pipeline (v2.3) or
+            ffmpeg lanczos upscale (v2.0).
         progress_callback: Optional async callback invoked with
-            ``(step, total_steps, stage, pct)`` where ``pct`` is 0.0-1.0.
+            ``(step, total_steps, stage, pct, status=None)`` where ``pct``
+            is 0.0-1.0 and ``status`` is an optional human-readable stage label.
         venv_python: Path to venv Python binary. Auto-detected if None.
 
     Returns:
@@ -277,7 +346,7 @@ async def run_mlx_generation(
         embeddings_path = str(embeddings_dir / f"_embeddings_{Path(output_path).stem}.npz")
 
         if progress_callback is not None:
-            await progress_callback(0, 0, 0, 0.01)
+            await progress_callback(0, 0, 0, 0.01, status="Encoding text")
 
         await _run_text_encoding_subprocess(
             python_bin=python_bin,
@@ -289,7 +358,7 @@ async def run_mlx_generation(
         )
 
         if progress_callback is not None:
-            await progress_callback(0, 0, 0, 0.05)
+            await progress_callback(0, 0, 0, 0.05, status="Text encoding complete")
 
     if model_version == "2.3":
         # LTX-2.3 uses --model-dir instead of --model-repo
@@ -304,6 +373,7 @@ async def run_mlx_generation(
             "--fps", str(fps),
             "--output-path", output_path,
             "--model-dir", model_repo,
+            "--generate-audio",
         ]
     else:
         cmd = [
@@ -325,6 +395,20 @@ async def run_mlx_generation(
 
     if image is not None:
         cmd.extend(["--image", image, "--image-strength", str(image_strength)])
+
+    is_two_stage = False
+    if upscale and model_version == "2.3":
+        # Two-stage neural upscale: find upsampler weights and pass path
+        upscaler_path = _get_upscaler_weights()
+        if upscaler_path:
+            cmd.extend(["--upscale", upscaler_path])
+            is_two_stage = True
+            log.info("Two-stage upscale enabled: %s", upscaler_path)
+        else:
+            log.warning("Upscaler weights not found, falling back to single-stage")
+    elif upscale:
+        # LTX-2.0 fallback: ffmpeg lanczos (--upscale without path not supported)
+        log.info("Upscale requested for v2.0 — not supported, skipping")
 
     log.info("Starting MLX generation: %s", " ".join(cmd[:6]) + " ...")
     log.debug("Full command: %s", cmd)
@@ -361,10 +445,10 @@ async def run_mlx_generation(
             stage = int(stage_match.group(1))
             step = int(stage_match.group(2))
             total = int(stage_match.group(3))
-            pct = _compute_progress(stage, step, total)
+            pct = _compute_progress(stage, step, total, is_two_stage=is_two_stage)
             log.debug("Progress: stage=%d step=%d/%d pct=%.2f", stage, step, total, pct)
             if progress_callback is not None:
-                await progress_callback(step, total, stage, pct)
+                await progress_callback(step, total, stage, pct, status="Generating video")
             continue
 
         # Parse STATUS lines
@@ -375,7 +459,15 @@ async def run_mlx_generation(
 
             # Map status messages to progress percentages
             pct = 0.85
-            if "decoding video" in status_msg.lower():
+            if "stage 1" in status_msg.lower():
+                pct = 0.06
+            elif "upscaling latent" in status_msg.lower():
+                pct = 0.57
+            elif "stage 2" in status_msg.lower():
+                pct = 0.63
+            elif "upscaling" in status_msg.lower():
+                pct = 0.83
+            elif "decoding video" in status_msg.lower():
                 pct = 0.88
             elif "decoding audio" in status_msg.lower():
                 pct = 0.93
@@ -385,7 +477,7 @@ async def run_mlx_generation(
                 pct = 0.02
 
             if progress_callback is not None:
-                await progress_callback(0, 0, 0, pct)
+                await progress_callback(0, 0, 0, pct, status=status_msg)
             continue
 
         # Log other stderr lines at debug level
@@ -406,7 +498,7 @@ async def run_mlx_generation(
     aggressive_cleanup()
 
     if proc.returncode != 0:
-        stderr_text = "\n".join(stderr_lines[-50:])  # Last 50 lines for context
+        stderr_text = "\n".join(stderr_lines[-100:])  # Last 100 lines for context
         log.error("MLX generation failed (exit code %d): %s", proc.returncode, stderr_text)
 
         # Detect Metal GPU out-of-memory crash (exit code -6 = SIGABRT from Metal)
@@ -422,7 +514,7 @@ async def run_mlx_generation(
 
     # Signal completion
     if progress_callback is not None:
-        await progress_callback(0, 0, 0, 1.0)
+        await progress_callback(0, 0, 0, 1.0, status="Complete")
 
     log.info("MLX generation complete: %s", output_path)
     return output_path

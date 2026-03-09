@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import platform
+import random
 import subprocess
 import uuid
 from contextlib import asynccontextmanager
@@ -83,18 +84,20 @@ class T2VRequest(BaseModel):
     height: int = Field(default=512, ge=256, le=1920)
     num_frames: int = Field(default=97, ge=9)
     steps: int = Field(default=8, ge=1, le=50)
-    seed: int = Field(default=42)
+    seed: int = Field(default=-1, description="Random seed (-1 for random)")
     guidance_scale: float = Field(default=1.0, ge=0.0, le=20.0)
     fps: int = Field(default=24, ge=1, le=60)
+    upscale: bool = Field(default=False, description="2x spatial upscale via latent upsampler")
 
 
 class PreviewRequest(BaseModel):
     """Rapid preview generation request. Resolution and steps are fixed."""
     prompt: str = Field(..., min_length=1, max_length=2000)
-    seed: int = Field(default=42)
+    seed: int = Field(default=-1, description="Random seed (-1 for random)")
     fps: int = Field(default=24, ge=1, le=60)
     source_image_path: str | None = Field(default=None)
     image_strength: float = Field(default=1.0, ge=0.0, le=1.0)
+    upscale: bool = Field(default=False, description="2x spatial upscale (384x256 -> 768x512)")
 
 
 class I2VRequest(BaseModel):
@@ -105,10 +108,11 @@ class I2VRequest(BaseModel):
     height: int = Field(default=512, ge=256, le=1920)
     num_frames: int = Field(default=97, ge=9)
     steps: int = Field(default=8, ge=1, le=50)
-    seed: int = Field(default=42)
+    seed: int = Field(default=-1, description="Random seed (-1 for random)")
     guidance_scale: float = Field(default=1.0, ge=0.0, le=20.0)
     fps: int = Field(default=24, ge=1, le=60)
     image_strength: float = Field(default=0.85, ge=0.0, le=1.0)
+    upscale: bool = Field(default=False, description="2x spatial upscale via latent upsampler")
 
 
 class EnhanceRequest(BaseModel):
@@ -130,7 +134,7 @@ class RetakeRequest(BaseModel):
     start_time_s: float = Field(..., ge=0.0)
     end_time_s: float = Field(..., gt=0.0)
     steps: int = Field(default=8, ge=1, le=50)
-    seed: int = Field(default=42)
+    seed: int = Field(default=-1, description="Random seed (-1 for random)")
     fps: int = Field(default=24, ge=1, le=60)
 
 
@@ -141,13 +145,20 @@ class ExtendRequest(BaseModel):
     direction: str = Field(default="forward", pattern="^(forward|backward)$")
     extension_frames: int = Field(default=49, ge=9)
     steps: int = Field(default=8, ge=1, le=50)
-    seed: int = Field(default=42)
+    seed: int = Field(default=-1, description="Random seed (-1 for random)")
     fps: int = Field(default=24, ge=1, le=60)
 
 
 class JobResponse(BaseModel):
     """Response with a job ID."""
     job_id: str
+
+
+def _resolve_seed(seed: int) -> int:
+    """Return a concrete seed — generates a random one if seed is -1."""
+    if seed < 0:
+        return random.randint(0, 2**31 - 1)
+    return seed
 
 
 class HealthResponse(BaseModel):
@@ -331,9 +342,9 @@ async def _run_t2v(job_id: str, req: T2VRequest) -> None:
     """Execute T2V generation in background."""
     jobs[job_id]["status"] = "running"
 
-    async def progress_cb(step: int, total: int, pct: float, preview_frame: str | None = None) -> None:
+    async def progress_cb(step: int, total: int, pct: float, preview_frame: str | None = None, *, status: str | None = None) -> None:
         jobs[job_id]["progress"] = pct
-        await _broadcast_progress(job_id, step, total, pct, preview_frame=preview_frame)
+        await _broadcast_progress(job_id, step, total, pct, preview_frame=preview_frame, status=status)
 
     try:
         result = await t2v_pipeline.generate(
@@ -342,9 +353,10 @@ async def _run_t2v(job_id: str, req: T2VRequest) -> None:
             height=req.height,
             num_frames=req.num_frames,
             steps=req.steps,
-            seed=req.seed,
+            seed=_resolve_seed(req.seed),
             guidance_scale=req.guidance_scale,
             fps=req.fps,
+            upscale=req.upscale,
             progress_callback=progress_cb,
         )
         jobs[job_id]["status"] = "completed"
@@ -370,17 +382,18 @@ async def _run_preview(job_id: str, req: PreviewRequest) -> None:
     """Execute rapid preview generation in background."""
     jobs[job_id]["status"] = "running"
 
-    async def progress_cb(step: int, total: int, pct: float, preview_frame: str | None = None) -> None:
+    async def progress_cb(step: int, total: int, pct: float, preview_frame: str | None = None, *, status: str | None = None) -> None:
         jobs[job_id]["progress"] = pct
-        await _broadcast_progress(job_id, step, total, pct, preview_frame=preview_frame)
+        await _broadcast_progress(job_id, step, total, pct, preview_frame=preview_frame, status=status)
 
     try:
         result = await preview_pipeline.generate(
             prompt=req.prompt,
-            seed=req.seed,
+            seed=_resolve_seed(req.seed),
             fps=req.fps,
             image=req.source_image_path,
             image_strength=req.image_strength,
+            upscale=req.upscale,
             progress_callback=progress_cb,
         )
         jobs[job_id]["status"] = "completed"
@@ -406,9 +419,9 @@ async def _run_i2v(job_id: str, req: I2VRequest) -> None:
     """Execute I2V generation in background."""
     jobs[job_id]["status"] = "running"
 
-    async def progress_cb(step: int, total: int, pct: float, preview_frame: str | None = None) -> None:
+    async def progress_cb(step: int, total: int, pct: float, preview_frame: str | None = None, *, status: str | None = None) -> None:
         jobs[job_id]["progress"] = pct
-        await _broadcast_progress(job_id, step, total, pct, preview_frame=preview_frame)
+        await _broadcast_progress(job_id, step, total, pct, preview_frame=preview_frame, status=status)
 
     try:
         result = await i2v_pipeline.generate(
@@ -418,10 +431,11 @@ async def _run_i2v(job_id: str, req: I2VRequest) -> None:
             height=req.height,
             num_frames=req.num_frames,
             steps=req.steps,
-            seed=req.seed,
+            seed=_resolve_seed(req.seed),
             guidance_scale=req.guidance_scale,
             fps=req.fps,
             image_strength=req.image_strength,
+            upscale=req.upscale,
             progress_callback=progress_cb,
         )
         jobs[job_id]["status"] = "completed"
@@ -469,9 +483,9 @@ async def _run_retake(job_id: str, req: RetakeRequest) -> None:
     """Execute retake generation in background."""
     jobs[job_id]["status"] = "running"
 
-    async def progress_cb(step: int, total: int, pct: float, preview_frame: str | None = None) -> None:
+    async def progress_cb(step: int, total: int, pct: float, preview_frame: str | None = None, *, status: str | None = None) -> None:
         jobs[job_id]["progress"] = pct
-        await _broadcast_progress(job_id, step, total, pct, preview_frame=preview_frame)
+        await _broadcast_progress(job_id, step, total, pct, preview_frame=preview_frame, status=status)
 
     try:
         result = await retake_pipeline.generate(
@@ -480,7 +494,7 @@ async def _run_retake(job_id: str, req: RetakeRequest) -> None:
             start_time_s=req.start_time_s,
             end_time_s=req.end_time_s,
             steps=req.steps,
-            seed=req.seed,
+            seed=_resolve_seed(req.seed),
             fps=req.fps,
             progress_callback=progress_cb,
         )
@@ -507,9 +521,9 @@ async def _run_extend(job_id: str, req: ExtendRequest) -> None:
     """Execute video extension in background."""
     jobs[job_id]["status"] = "running"
 
-    async def progress_cb(step: int, total: int, pct: float, preview_frame: str | None = None) -> None:
+    async def progress_cb(step: int, total: int, pct: float, preview_frame: str | None = None, *, status: str | None = None) -> None:
         jobs[job_id]["progress"] = pct
-        await _broadcast_progress(job_id, step, total, pct, preview_frame=preview_frame)
+        await _broadcast_progress(job_id, step, total, pct, preview_frame=preview_frame, status=status)
 
     try:
         result = await extend_pipeline.generate(
@@ -518,7 +532,7 @@ async def _run_extend(job_id: str, req: ExtendRequest) -> None:
             direction=req.direction,
             extension_frames=req.extension_frames,
             steps=req.steps,
-            seed=req.seed,
+            seed=_resolve_seed(req.seed),
             fps=req.fps,
             progress_callback=progress_cb,
         )
@@ -632,6 +646,7 @@ async def _broadcast_progress(
     done: bool = False,
     error: str | None = None,
     preview_frame: str | None = None,
+    status: str | None = None,
 ) -> None:
     """Broadcast progress update to all WebSocket connections for a job."""
     if job_id not in ws_connections:
@@ -650,6 +665,9 @@ async def _broadcast_progress(
 
     if preview_frame is not None:
         msg["preview_frame"] = preview_frame
+
+    if status is not None:
+        msg["status"] = status
 
     dead: list[WebSocket] = []
     for ws in ws_connections[job_id]:

@@ -58,6 +58,7 @@ class TextToVideoPipeline:
         seed: int = 42,
         guidance_scale: float = 1.0,
         fps: int = 24,
+        upscale: bool = False,
         progress_callback: Callable[[int, int, float, str | None], None] | None = None,
     ) -> GenerationResult:
         """Run the full T2V generation pipeline.
@@ -81,11 +82,12 @@ class TextToVideoPipeline:
         start_time = time.monotonic()
 
         async def _notify(
-            step: int, total: int, pct: float, frame: str | None = None
+            step: int, total: int, pct: float, frame: str | None = None,
+            *, status: str | None = None
         ) -> None:
             if not progress_callback:
                 return
-            result = progress_callback(step, total, pct, frame)
+            result = progress_callback(step, total, pct, frame, status=status)
             if inspect.isawaitable(result):
                 await result
 
@@ -97,9 +99,10 @@ class TextToVideoPipeline:
 
         # Adapt mlx_runner progress to pipeline progress_callback format
         async def _progress_adapter(
-            step: int, total_steps: int, stage: int, pct: float
+            step: int, total_steps: int, stage: int, pct: float,
+            *, status: str | None = None
         ) -> None:
-            await _notify(step, total_steps, pct, None)
+            await _notify(step, total_steps, pct, None, status=status)
 
         # Run MLX inference (handles model loading, text encoding, denoising,
         # VAE decode, audio decode, and ffmpeg muxing internally)
@@ -118,6 +121,7 @@ class TextToVideoPipeline:
             fps=fps,
             output_path=str(output_path),
             tiling="auto",
+            upscale=upscale,
             progress_callback=_progress_adapter,
         )
 

@@ -184,6 +184,8 @@ def get_pixel_coords(
         # Temporal axis: shift by -(scale-1) to handle first-frame offset
         temporal = pixel_coords[:, 0:1, :, :]
         temporal = temporal - (scale_factors.time - 1)
+        # Clip to min=0 to avoid negative temporal positions
+        temporal = mx.maximum(temporal, 0)
         pixel_coords = mx.concatenate([temporal, pixel_coords[:, 1:, :, :]], axis=1)
 
     return pixel_coords

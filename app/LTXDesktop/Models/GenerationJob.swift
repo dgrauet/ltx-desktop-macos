@@ -6,12 +6,13 @@ struct T2VRequest: Codable {
     var height: Int = 512
     var numFrames: Int = 97
     var steps: Int = 8
-    var seed: Int = 42
+    var seed: Int = -1
     var guidanceScale: Double = 1.0
     var fps: Int = 24
+    var upscale: Bool = false
 
     enum CodingKeys: String, CodingKey {
-        case prompt, width, height, steps, seed, fps
+        case prompt, width, height, steps, seed, fps, upscale
         case numFrames = "num_frames"
         case guidanceScale = "guidance_scale"
     }
@@ -19,13 +20,14 @@ struct T2VRequest: Codable {
 
 struct PreviewRequest: Codable {
     var prompt: String
-    var seed: Int = 42
+    var seed: Int = -1
     var fps: Int = 24
     var sourceImagePath: String?
     var imageStrength: Double = 1.0
+    var upscale: Bool = false
 
     enum CodingKeys: String, CodingKey {
-        case prompt, seed, fps
+        case prompt, seed, fps, upscale
         case sourceImagePath = "source_image_path"
         case imageStrength = "image_strength"
     }
@@ -38,13 +40,14 @@ struct I2VRequest: Codable {
     var height: Int = 512
     var numFrames: Int = 97
     var steps: Int = 8
-    var seed: Int = 42
+    var seed: Int = -1
     var guidanceScale: Double = 1.0
     var fps: Int = 24
     var imageStrength: Double = 0.85
+    var upscale: Bool = false
 
     enum CodingKeys: String, CodingKey {
-        case prompt, width, height, steps, seed, fps
+        case prompt, width, height, steps, seed, fps, upscale
         case sourceImagePath = "source_image_path"
         case numFrames = "num_frames"
         case guidanceScale = "guidance_scale"
@@ -93,9 +96,10 @@ struct ProgressUpdate: Codable {
     let done: Bool?
     let error: String?
     let previewFrame: String?
+    let status: String?
 
     enum CodingKeys: String, CodingKey {
-        case step, pct, done, error
+        case step, pct, done, error, status
         case jobId = "job_id"
         case totalSteps = "total_steps"
         case previewFrame = "preview_frame"

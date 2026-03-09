@@ -22,7 +22,7 @@ class BasicTransformerBlock1D(nn.Module):
         dim: int,
         heads: int,
         dim_head: int,
-        rope_type: LTXRopeType = LTXRopeType.INTERLEAVED,
+        rope_type: LTXRopeType = LTXRopeType.SPLIT,
         norm_eps: float = 1e-6,
         apply_gated_attention: bool = False,
     ):
@@ -77,7 +77,7 @@ class Embeddings1DConnector(nn.Module):
         positional_embedding_theta: float = 10000.0,
         positional_embedding_max_pos: Optional[List[int]] = None,
         num_learnable_registers: Optional[int] = 128,
-        rope_type: LTXRopeType = LTXRopeType.INTERLEAVED,
+        rope_type: LTXRopeType = LTXRopeType.SPLIT,
         norm_eps: float = 1e-6,
         apply_gated_attention: bool = False,
     ):
@@ -86,7 +86,7 @@ class Embeddings1DConnector(nn.Module):
         self.num_attention_heads = num_attention_heads
         self.inner_dim = num_attention_heads * attention_head_dim
         self.positional_embedding_theta = positional_embedding_theta
-        self.positional_embedding_max_pos = positional_embedding_max_pos or [1]
+        self.positional_embedding_max_pos = positional_embedding_max_pos or [4096]
         self.rope_type = rope_type
         self.norm_eps = norm_eps
 
