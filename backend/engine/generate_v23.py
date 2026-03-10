@@ -29,10 +29,13 @@ Progress is reported on stderr as::
 from __future__ import annotations
 
 import argparse
+import base64
 import gc
+import io
 import logging
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 import mlx.core as mx
@@ -56,6 +59,67 @@ def _report_memory(label: str) -> None:
     cache = mx.get_cache_memory() / (1024**3)
     peak = mx.get_peak_memory() / (1024**3)
     _progress(f"MEMORY:{label}:active={active:.3f}:cache={cache:.3f}:peak={peak:.3f}")
+
+
+def _decode_preview_frame(
+    latent: mx.array,
+    decoder,
+    preview_dir: str,
+    step: int,
+) -> str | None:
+    """Decode a single frame from intermediate latent to JPEG for preview.
+
+    Extracts the middle temporal frame from the latent, decodes via VAE,
+    and saves as a JPEG file. Returns the file path, or None on failure.
+
+    Args:
+        latent: (B, 128, F', H', W') intermediate latent tensor.
+        decoder: Loaded VideoDecoder instance.
+        preview_dir: Directory to write preview JPEG files.
+        step: Current diffusion step (used for filename).
+
+    Returns:
+        Path to the JPEG file, or None if decoding failed.
+    """
+    try:
+        from PIL import Image
+
+        # Extract middle temporal frame: (B, 128, 1, H', W')
+        frame_idx = latent.shape[2] // 2
+        frame_latent = latent[:, :, frame_idx : frame_idx + 1, :, :]
+
+        # Decode via VAE — single latent frame produces ~8 pixel frames
+        pixels = decoder(frame_latent)  # (B, 3, F_out, H, W)
+        mx.eval(pixels)
+
+        # Take middle output frame
+        mid = pixels.shape[2] // 2
+        frame_np = np.array(pixels[0, :, mid, :, :])  # (3, H, W)
+        frame_np = frame_np.transpose(1, 2, 0)  # (H, W, 3)
+        frame_np = np.clip((frame_np + 1) * 127.5, 0, 255).astype(np.uint8)
+
+        img = Image.fromarray(frame_np)
+
+        # Resize to max 512px on long side for small JPEG
+        max_dim = max(img.width, img.height)
+        if max_dim > 512:
+            scale = 512 / max_dim
+            img = img.resize(
+                (int(img.width * scale), int(img.height * scale)),
+                Image.LANCZOS,
+            )
+
+        preview_path = os.path.join(preview_dir, f"preview_step{step}.jpg")
+        img.save(preview_path, format="JPEG", quality=60)
+
+        # Free intermediate tensors
+        del pixels, frame_np
+        gc.collect()
+
+        return preview_path
+    except Exception as e:
+        log.warning("Preview frame decode failed at step %d: %s", step, e)
+        return None
 
 
 def _load_precomputed_embeddings(path: str) -> dict:
@@ -182,6 +246,10 @@ def main() -> None:
         "--ffmpeg-upscale", action="store_true",
         help="Apply 2x lanczos upscale via ffmpeg as post-processing after video is saved",
     )
+    parser.add_argument(
+        "--preview-interval", type=int, default=0,
+        help="Emit a preview frame every N diffusion steps (0 = disabled)",
+    )
     args = parser.parse_args()
 
     model_dir = Path(args.model_dir)
@@ -259,15 +327,31 @@ def _run_single_stage(
         config.image_latent = _encode_image(args.image, model_dir, args.height, args.width)
         config.image_strength = args.image_strength
 
+    # Load VAE decoder for intermediate preview frames (if enabled)
+    preview_decoder = None
+    preview_dir = None
+    if args.preview_interval > 0:
+        from engine.ltx23_model.vae_decoder import load_vae_decoder
+
+        preview_decoder = load_vae_decoder(model_dir)
+        preview_dir = tempfile.mkdtemp(prefix="ltx_preview_")
+        log.info("Preview decoder loaded, interval=%d", args.preview_interval)
+
     def on_progress(step: int, total: int, latent: mx.array) -> None:
         _progress(f"STAGE:1:STEP:{step}:{total}")
+        if preview_decoder and preview_dir and step % args.preview_interval == 0:
+            path = _decode_preview_frame(latent, preview_decoder, preview_dir, step)
+            if path:
+                _progress(f"PREVIEW:{path}")
 
     _progress("STATUS:Generating video")
     output = generate(model, config, progress_callback=on_progress)
     _report_memory("after_diffusion")
 
-    # Free model before VAE decode
+    # Free model and preview decoder before final VAE decode
     del model
+    if preview_decoder is not None:
+        del preview_decoder
     gc.collect()
     mx.clear_cache()
 
@@ -279,6 +363,11 @@ def _run_single_stage(
     if args.ffmpeg_upscale:
         _progress("STATUS:Upscaling 2x (ffmpeg)")
         _ffmpeg_upscale_2x(args.output_path)
+
+    # Clean up preview temp dir
+    if preview_dir:
+        import shutil
+        shutil.rmtree(preview_dir, ignore_errors=True)
 
     _report_memory("final")
     _progress("STATUS:Complete")
@@ -337,8 +426,22 @@ def _run_two_stage(
         config_s1.image_latent = stage1_image_latent
         config_s1.image_strength = args.image_strength
 
+    # Load VAE decoder for intermediate preview frames (if enabled)
+    preview_decoder = None
+    preview_dir = None
+    if args.preview_interval > 0:
+        from engine.ltx23_model.vae_decoder import load_vae_decoder
+
+        preview_decoder = load_vae_decoder(model_dir)
+        preview_dir = tempfile.mkdtemp(prefix="ltx_preview_")
+        log.info("Preview decoder loaded for two-stage, interval=%d", args.preview_interval)
+
     def on_progress_s1(step: int, total: int, latent: mx.array) -> None:
         _progress(f"STAGE:1:STEP:{step}:{total}")
+        if preview_decoder and preview_dir and step % args.preview_interval == 0:
+            path = _decode_preview_frame(latent, preview_decoder, preview_dir, step)
+            if path:
+                _progress(f"PREVIEW:{path}")
 
     output_s1 = generate(model, config_s1, progress_callback=on_progress_s1)
     _report_memory("after_diffusion")
@@ -351,9 +454,12 @@ def _run_two_stage(
 
     log.info("Stage 1 complete. Video latent: %s", video_latent.shape)
 
-    # Unload transformer before upscale — frees ~21GB for upsampler activations
+    # Unload transformer and preview decoder before upscale — frees ~21GB
     del model
     del output_s1
+    if preview_decoder is not None:
+        del preview_decoder
+        preview_decoder = None
     gc.collect()
     mx.clear_cache()
     log.info("Transformer unloaded for upscale phase")
@@ -411,13 +517,26 @@ def _run_two_stage(
         config_s2.image_latent = stage2_image_latent
         config_s2.image_strength = args.image_strength
 
+    # Reload preview decoder for Stage 2 previews (if enabled)
+    if args.preview_interval > 0 and preview_dir:
+        from engine.ltx23_model.vae_decoder import load_vae_decoder
+
+        preview_decoder = load_vae_decoder(model_dir)
+        log.info("Preview decoder reloaded for Stage 2")
+
     def on_progress_s2(step: int, total: int, latent: mx.array) -> None:
         _progress(f"STAGE:2:STEP:{step}:{total}")
+        if preview_decoder and preview_dir and step % args.preview_interval == 0:
+            path = _decode_preview_frame(latent, preview_decoder, preview_dir, step)
+            if path:
+                _progress(f"PREVIEW:{path}")
 
     output_s2 = generate(model, config_s2, progress_callback=on_progress_s2)
 
-    # Free model before VAE decode
+    # Free model and preview decoder before VAE decode
     del model, video_latent, audio_latent
+    if preview_decoder is not None:
+        del preview_decoder
     gc.collect()
     mx.clear_cache()
 
@@ -429,6 +548,11 @@ def _run_two_stage(
     if args.ffmpeg_upscale:
         _progress("STATUS:Upscaling 2x (ffmpeg)")
         _ffmpeg_upscale_2x(args.output_path)
+
+    # Clean up preview temp dir
+    if preview_dir:
+        import shutil
+        shutil.rmtree(preview_dir, ignore_errors=True)
 
     _report_memory("final")
     _progress("STATUS:Complete")

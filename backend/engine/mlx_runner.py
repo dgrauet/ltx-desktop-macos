@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -31,6 +32,7 @@ _QUANTIZED_PATHS = [
 _STAGE_RE = re.compile(r"^STAGE:(\d+):STEP:(\d+):(\d+)")
 _STATUS_RE = re.compile(r"^STATUS:(.+)")
 _MEMORY_RE = re.compile(r"^MEMORY:(\w+):active=([\d.]+):cache=([\d.]+):peak=([\d.]+)")
+_PREVIEW_RE = re.compile(r"^PREVIEW:(.+)")
 
 # Progress mapping — maps (stage, step/total) to overall 0.0-1.0 range
 # When two-stage is active, Stage 1 gets 0.05-0.55, Stage 2 gets 0.65-0.80
@@ -279,6 +281,7 @@ async def run_mlx_generation(
     tiling: str = "auto",
     upscale: bool = False,
     ffmpeg_upscale: bool = False,
+    preview_interval: int = 0,
     progress_callback: Callable[..., Awaitable[None]] | None = None,
     venv_python: str | None = None,
 ) -> dict:
@@ -418,6 +421,10 @@ async def run_mlx_generation(
         cmd.append("--ffmpeg-upscale")
         log.info("ffmpeg lanczos 2x post-processing enabled")
 
+    if preview_interval > 0:
+        cmd.extend(["--preview-interval", str(preview_interval)])
+        log.info("Preview frames enabled every %d steps", preview_interval)
+
     log.info("Starting MLX generation: %s", " ".join(cmd[:6]) + " ...")
     log.debug("Full command: %s", cmd)
 
@@ -439,6 +446,9 @@ async def run_mlx_generation(
     stderr_lines: list[str] = []
     # Track memory stats reported by the subprocess
     subprocess_memory: dict[str, dict[str, float]] = {}
+    # Track last progress values for PREVIEW lines
+    last_step, last_total, last_stage, last_pct = 0, 0, 0, 0.0
+    last_status: str | None = "Generating video"
 
     # Read stderr line by line for progress parsing
     assert proc.stderr is not None  # noqa: S101
@@ -449,6 +459,26 @@ async def run_mlx_generation(
         line = raw_line.decode("utf-8", errors="replace").rstrip()
         stderr_lines.append(line)
 
+        # Parse PREVIEW lines (file path to JPEG preview frame)
+        preview_match = _PREVIEW_RE.match(line)
+        if preview_match:
+            preview_path = preview_match.group(1).strip()
+            try:
+                import base64
+
+                with open(preview_path, "rb") as f:
+                    b64_frame = base64.b64encode(f.read()).decode("ascii")
+                os.unlink(preview_path)
+                log.debug("Preview frame: %d bytes base64", len(b64_frame))
+                if progress_callback is not None:
+                    await progress_callback(
+                        last_step, last_total, last_stage, last_pct,
+                        status=last_status, preview_frame=b64_frame,
+                    )
+            except Exception as e:
+                log.warning("Failed to read preview frame %s: %s", preview_path, e)
+            continue
+
         # Parse STAGE:X:STEP:Y:TOTAL lines
         stage_match = _STAGE_RE.match(line)
         if stage_match:
@@ -456,6 +486,8 @@ async def run_mlx_generation(
             step = int(stage_match.group(2))
             total = int(stage_match.group(3))
             pct = _compute_progress(stage, step, total, is_two_stage=is_two_stage)
+            last_step, last_total, last_stage, last_pct = step, total, stage, pct
+            last_status = "Generating video"
             log.debug("Progress: stage=%d step=%d/%d pct=%.2f", stage, step, total, pct)
             if progress_callback is not None:
                 await progress_callback(step, total, stage, pct, status="Generating video")
@@ -483,6 +515,7 @@ async def run_mlx_generation(
         status_match = _STATUS_RE.match(line)
         if status_match:
             status_msg = status_match.group(1).strip()
+            last_status = status_msg
             log.info("MLX status: %s", status_msg)
 
             # Map status messages to progress percentages

@@ -87,9 +87,9 @@ class PreviewPipeline:
         # Adapt mlx_runner progress to pipeline progress_callback format
         async def _progress_adapter(
             step: int, total_steps: int, stage: int, pct: float,
-            *, status: str | None = None
+            *, status: str | None = None, preview_frame: str | None = None,
         ) -> None:
-            await _notify(step, total_steps, pct, None, status=status)
+            await _notify(step, total_steps, pct, preview_frame, status=status)
 
         # Run MLX inference with preview settings (small resolution, few frames)
         mode = "I2V" if image else "T2V"
