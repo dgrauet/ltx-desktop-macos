@@ -61,10 +61,14 @@ ws_connections: dict[str, list[WebSocket]] = {}
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup: load model stub, warm up. Shutdown: unload."""
+    """Startup: load model stub, warm up, seed history. Shutdown: unload."""
     log.info("Starting LTX Desktop backend...")
     model_manager.load_model("notapalindrome/ltx2-mlx-av")
     aggressive_cleanup()
+    # Populate history with existing video files not yet tracked
+    seeded = history_store.seed_from_existing_files()
+    if seeded:
+        log.info("Seeded %d existing videos into history", seeded)
     log.info("Backend ready")
     yield
     log.info("Shutting down...")

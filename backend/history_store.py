@@ -108,6 +108,79 @@ def get_entries(limit: int = MAX_ENTRIES) -> list[dict[str, Any]]:
     return entries[:limit]
 
 
+def seed_from_existing_files() -> int:
+    """Populate history with existing MP4 files not already tracked.
+
+    Scans ~/.ltx-desktop/outputs/ and ~/.ltx-desktop/outputs/previews/
+    for MP4 files and adds entries for any not already in the history.
+    Uses file metadata (creation time, name) since prompt info is unavailable.
+
+    Returns:
+        Number of entries added.
+    """
+    output_dirs = [
+        HISTORY_DIR / "outputs",
+        HISTORY_DIR / "outputs" / "previews",
+    ]
+
+    with _lock:
+        entries = _read_entries()
+        known_paths = {e.get("output_path") for e in entries}
+        known_jobs = {e.get("job_id") for e in entries}
+        added = 0
+
+        for output_dir in output_dirs:
+            if not output_dir.exists():
+                continue
+            is_preview = "previews" in str(output_dir)
+            for mp4 in sorted(output_dir.glob("*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True):
+                path_str = str(mp4)
+                job_id = mp4.stem
+                # Strip prefixes like "preview_", "i2v_"
+                clean_id = job_id
+                for prefix in ("preview_", "i2v_"):
+                    if clean_id.startswith(prefix):
+                        clean_id = clean_id[len(prefix):]
+
+                if path_str in known_paths or clean_id in known_jobs or job_id in known_jobs:
+                    continue
+
+                # Infer generation type from filename
+                if is_preview or job_id.startswith("preview_"):
+                    gen_type = "preview"
+                elif job_id.startswith("i2v_"):
+                    gen_type = "i2v"
+                else:
+                    gen_type = "t2v"
+
+                stat = mp4.stat()
+                created = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
+
+                entries.append({
+                    "job_id": job_id,
+                    "prompt": "(imported from existing file)",
+                    "output_path": path_str,
+                    "duration_seconds": 0,
+                    "width": 0,
+                    "height": 0,
+                    "num_frames": 0,
+                    "fps": 24,
+                    "seed": 0,
+                    "generation_type": gen_type,
+                    "created_at": created.isoformat(),
+                })
+                added += 1
+
+        if added > 0:
+            # Sort newest first and cap
+            entries.sort(key=lambda e: e.get("created_at", ""), reverse=True)
+            entries = entries[:MAX_ENTRIES]
+            _write_entries(entries)
+            log.info("History: seeded %d entries from existing files", added)
+
+    return added
+
+
 def delete_entry(job_id: str) -> bool:
     """Remove a history entry by job_id.
 
