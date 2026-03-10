@@ -282,6 +282,7 @@ async def run_mlx_generation(
     upscale: bool = False,
     ffmpeg_upscale: bool = False,
     preview_interval: int = 0,
+    skip_bwe: bool = True,
     progress_callback: Callable[..., Awaitable[None]] | None = None,
     venv_python: str | None = None,
 ) -> dict:
@@ -424,6 +425,11 @@ async def run_mlx_generation(
     if preview_interval > 0:
         cmd.extend(["--preview-interval", str(preview_interval)])
         log.info("Preview frames enabled every %d steps", preview_interval)
+
+    if skip_bwe:
+        cmd.append("--no-bwe")
+        log.info("BWE disabled — audio output at 16kHz (less metallic)")
+
 
     log.info("Starting MLX generation: %s", " ".join(cmd[:6]) + " ...")
     log.debug("Full command: %s", cmd)

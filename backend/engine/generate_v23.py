@@ -250,6 +250,11 @@ def main() -> None:
         "--preview-interval", type=int, default=0,
         help="Emit a preview frame every N diffusion steps (0 = disabled)",
     )
+    parser.add_argument(
+        "--no-bwe", action="store_true",
+        help="Skip bandwidth extension — output audio at 16kHz instead of 48kHz. "
+             "Reduces metallic artifacts from synthesized harmonics.",
+    )
     args = parser.parse_args()
 
     model_dir = Path(args.model_dir)
@@ -642,7 +647,10 @@ def _decode_and_save(output, args, model_dir: Path) -> None:
     audio_latent = getattr(output, "audio_latent", None)
     if audio_latent is not None and args.generate_audio:
         _progress("STATUS:Decoding audio")
-        audio_path = _decode_audio(audio_latent, model_dir, args.output_path)
+        audio_path = _decode_audio(
+            audio_latent, model_dir, args.output_path,
+            skip_bwe=args.no_bwe,
+        )
         gc.collect()
         mx.clear_cache()
 
@@ -686,10 +694,21 @@ def _decode_and_save(output, args, model_dir: Path) -> None:
             pass
 
 
-def _decode_audio(audio_latent: mx.array, model_dir: Path, output_path: str) -> str | None:
+def _decode_audio(
+    audio_latent: mx.array, model_dir: Path, output_path: str,
+    skip_bwe: bool = False,
+) -> str | None:
     """Decode audio latent to WAV via audio VAE + vocoder.
 
-    Returns path to WAV file, or None on failure.
+    Args:
+        audio_latent: Audio latent tensor from the diffusion pipeline.
+        model_dir: Path to model weights directory.
+        output_path: Base path for the output (used to derive WAV filename).
+        skip_bwe: If True, skip bandwidth extension and output at 16kHz.
+            Reduces metallic artifacts from synthesized harmonics.
+
+    Returns:
+        Path to WAV file, or None on failure.
     """
     import soundfile as sf
 
@@ -717,17 +736,30 @@ def _decode_audio(audio_latent: mx.array, model_dir: Path, output_path: str) -> 
     gc.collect()
     mx.clear_cache()
 
-    # Vocoder: mel -> waveform at 48 kHz
+    # Vocoder: mel -> waveform
     from engine.ltx23_model.vocoder import load_vocoder
 
-    vocoder = load_vocoder(model_dir)
-    waveform = vocoder(mel_spec)
-    mx.eval(waveform)
-    log.info("Waveform shape: %s, sample_rate: %d", waveform.shape, vocoder.output_sample_rate)
+    if skip_bwe:
+        # Bypass BWE — use only the base vocoder at 16kHz.
+        # Avoids metallic artifacts from synthesized high-frequency harmonics.
+        from engine.ltx23_model.vocoder import Vocoder as _Vocoder
+        vocoder_wrapper = load_vocoder(model_dir)
+        waveform = vocoder_wrapper.vocoder(mel_spec)
+        mx.eval(waveform)
+        sample_rate = vocoder_wrapper.input_sr  # 16000
+        log.info(
+            "Waveform (no BWE, %dHz): shape=%s", sample_rate, waveform.shape,
+        )
+        del vocoder_wrapper
+    else:
+        vocoder = load_vocoder(model_dir)
+        waveform = vocoder(mel_spec)
+        mx.eval(waveform)
+        sample_rate = vocoder.output_sample_rate  # 48000
+        log.info("Waveform shape: %s, sample_rate: %d", waveform.shape, sample_rate)
+        del vocoder
 
-    sample_rate = vocoder.output_sample_rate
-
-    del vocoder, mel_spec
+    del mel_spec
     gc.collect()
     mx.clear_cache()
 
@@ -747,8 +779,8 @@ def _decode_audio(audio_latent: mx.array, model_dir: Path, output_path: str) -> 
     if peak > 1e-6:
         target_peak = 0.95
         gain = target_peak / peak
-        # Cap the gain to avoid amplifying noise when there's very little signal
-        gain = min(gain, 20.0)
+        # Cap gain to avoid amplifying vocoder artifacts (metallic harmonics)
+        gain = min(gain, 8.0)
         audio_np = audio_np * gain
         log.info("Audio normalized: gain=%.2f, new peak=%.4f", gain, np.max(np.abs(audio_np)))
 
