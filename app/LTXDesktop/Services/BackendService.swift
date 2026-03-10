@@ -105,6 +105,36 @@ class BackendService: ObservableObject {
         }
     }
 
+    // MARK: - Model Management
+
+    func listModels() async throws -> ModelListResponse {
+        return try await get("/api/v1/models")
+    }
+
+    func downloadModel(modelId: String) async throws -> ModelDownloadResponse {
+        return try await post(
+            "/api/v1/models/download",
+            body: ModelDownloadRequest(modelId: modelId)
+        )
+    }
+
+    func downloadStatus(downloadId: String) async throws -> DownloadStatusResponse {
+        return try await get("/api/v1/models/download/\(downloadId)/status")
+    }
+
+    func deleteModel(modelId: String) async throws -> ModelDeleteResponse {
+        let url = URL(string: "\(baseURL)/api/v1/models/\(modelId)")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let body = String(data: data, encoding: .utf8) ?? "(no body)"
+            throw BackendError.requestFailed(code, body)
+        }
+        return try decoder.decode(ModelDeleteResponse.self, from: data)
+    }
+
     // MARK: - LoRA Management
 
     func listLoRAs() async throws -> [LoRAInfo] {
@@ -120,6 +150,26 @@ class BackendService: ObservableObject {
     @discardableResult
     func unloadLoRA(loraId: String) async throws -> SuccessResponse {
         return try await post("/api/v1/loras/unload/\(loraId)", body: EmptyBody())
+    }
+
+    // MARK: - History
+
+    func fetchHistory() async throws -> [HistoryEntry] {
+        return try await get("/api/v1/history")
+    }
+
+    @discardableResult
+    func deleteHistoryItem(jobId: String) async throws -> SuccessResponse {
+        let url = URL(string: "\(baseURL)/api/v1/history/\(jobId)")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let body = String(data: data, encoding: .utf8) ?? "(no body)"
+            throw BackendError.requestFailed(code, body)
+        }
+        return try decoder.decode(SuccessResponse.self, from: data)
     }
 
     // MARK: - Export
@@ -177,3 +227,28 @@ enum BackendError: LocalizedError {
 }
 
 private struct EmptyBody: Encodable {}
+
+/// A single history entry as returned by GET /api/v1/history.
+struct HistoryEntry: Decodable {
+    let jobId: String
+    let prompt: String
+    let outputPath: String
+    let durationSeconds: Double
+    let width: Int
+    let height: Int
+    let numFrames: Int
+    let fps: Int
+    let seed: Int
+    let generationType: String
+    let createdAt: String
+
+    enum CodingKeys: String, CodingKey {
+        case prompt, width, height, fps, seed
+        case jobId = "job_id"
+        case outputPath = "output_path"
+        case durationSeconds = "duration_seconds"
+        case numFrames = "num_frames"
+        case generationType = "generation_type"
+        case createdAt = "created_at"
+    }
+}

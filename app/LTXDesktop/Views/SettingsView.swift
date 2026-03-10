@@ -3,24 +3,13 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject var backendService: BackendService
     @StateObject private var memoryVM = MemoryViewModel()
+    @StateObject private var modelsVM = ModelsViewModel()
 
     // General — Prompt Enhancement
     @AppStorage("promptEnhanceEnabled") private var enhanceEnabled: Bool = true
 
     // General — Output directory
     @AppStorage("outputDirectory") private var outputDirectory: String = ""
-
-    // Known models (hardcoded for Sprint 3)
-    private let knownModels: [ModelInfo] = [
-        ModelInfo(id: "notapalindrome/ltx2-mlx-av",
-                  name: "LTX-2 MLX (distilled + audio)",
-                  sizeGb: 42.0,
-                  loaded: false),
-        ModelInfo(id: "mlx-community/Qwen3.5-2B-4bit",
-                  name: "Qwen3.5-2B (prompt enhancer)",
-                  sizeGb: 1.2,
-                  loaded: false),
-    ]
 
     var body: some View {
         TabView {
@@ -47,9 +36,11 @@ struct SettingsView: View {
         .padding()
         .onAppear {
             memoryVM.startPolling(service: backendService, isGenerating: false)
+            modelsVM.loadModels(service: backendService)
         }
         .onDisappear {
             memoryVM.stopPolling()
+            modelsVM.stopAllPolling()
         }
     }
 
@@ -142,72 +133,201 @@ struct SettingsView: View {
     private var modelsTab: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                Text("Models")
-                    .font(.title2)
-                    .fontWeight(.semibold)
+                // Header with refresh button
+                HStack {
+                    Text("Models")
+                        .font(.title2)
+                        .fontWeight(.semibold)
 
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(knownModels.enumerated()), id: \.element.id) { index, model in
-                        modelRow(model)
+                    Spacer()
 
-                        if index < knownModels.count - 1 {
-                            Divider()
-                                .padding(.leading, 16)
+                    Button {
+                        modelsVM.loadModels(service: backendService)
+                    } label: {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(modelsVM.isLoading)
+                }
+
+                // Error banner
+                if let error = modelsVM.errorMessage {
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.red)
+                        Text(error)
+                            .font(.caption)
+                        Spacer()
+                        Button("Dismiss") {
+                            modelsVM.errorMessage = nil
+                        }
+                        .font(.caption)
+                        .buttonStyle(.borderless)
+                    }
+                    .padding(10)
+                    .background(Color.red.opacity(0.1))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+
+                if modelsVM.isLoading && modelsVM.models.isEmpty {
+                    VStack(spacing: 12) {
+                        ProgressView()
+                        Text("Loading model information...")
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 100)
+                } else {
+                    // Model list
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(modelsVM.models.enumerated()), id: \.element.id) { index, model in
+                            modelRow(model)
+
+                            if index < modelsVM.models.count - 1 {
+                                Divider()
+                                    .padding(.leading, 16)
+                            }
                         }
                     }
+                    .background(Color(.controlBackgroundColor).opacity(0.5))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+
+                    // Disk usage summary
+                    HStack(spacing: 16) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "internaldrive")
+                                .foregroundStyle(.secondary)
+                                .font(.caption)
+                            Text("Total disk usage: \(String(format: "%.1f GB", modelsVM.totalDiskGb))")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Spacer()
+
+                        let downloadedCount = modelsVM.models.filter(\.downloaded).count
+                        Text("\(downloadedCount) of \(modelsVM.models.count) models downloaded")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.top, 4)
                 }
-                .background(Color(.controlBackgroundColor).opacity(0.5))
-                .clipShape(RoundedRectangle(cornerRadius: 10))
 
                 HStack(spacing: 6) {
                     Image(systemName: "info.circle")
                         .foregroundStyle(.secondary)
                         .font(.caption)
-                    Text("Models are downloaded to ~/.cache/huggingface/ on first use.")
+                    Text("Models are stored in ~/.cache/huggingface/. Deleting a model frees disk space but requires re-download before next use.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .padding(.top, 4)
 
                 Spacer()
             }
             .padding()
         }
+        .alert(
+            "Delete Model",
+            isPresented: Binding(
+                get: { modelsVM.modelPendingDelete != nil },
+                set: { if !$0 { modelsVM.cancelDelete() } }
+            ),
+            presenting: modelsVM.modelPendingDelete
+        ) { model in
+            Button("Cancel", role: .cancel) {
+                modelsVM.cancelDelete()
+            }
+            Button("Delete", role: .destructive) {
+                modelsVM.deleteModel(modelId: model.id, service: backendService)
+                modelsVM.cancelDelete()
+            }
+        } message: { model in
+            Text("Are you sure you want to delete \"\(model.name)\"? This will free approximately \(model.sizeLabel) of disk space. You will need to re-download the model before generating videos.")
+        }
     }
 
     private func modelRow(_ model: ModelInfo) -> some View {
-        HStack(spacing: 12) {
-            // Status dot
-            Circle()
-                .fill(model.loaded ? Color.green : Color(.systemGray))
-                .frame(width: 10, height: 10)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                // Status indicator
+                Circle()
+                    .fill(model.downloaded ? Color.green : Color(.systemGray))
+                    .frame(width: 10, height: 10)
 
-            // Name + ID
-            VStack(alignment: .leading, spacing: 2) {
-                Text(model.name)
-                    .font(.body)
-                Text(model.id)
+                // Name + description
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(model.name)
+                            .font(.body)
+                            .fontWeight(.medium)
+
+                        Text(model.typeLabel)
+                            .font(.caption2)
+                            .fontWeight(.medium)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.accentColor.opacity(0.12))
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                    }
+
+                    Text(model.description)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer()
+
+                // Size badge
+                Text(model.sizeLabel)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    .fontWeight(.medium)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.accentColor.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 5))
+
+                // Action buttons
+                if modelsVM.isDownloading(model.id) {
+                    // Downloading state
+                    VStack(spacing: 2) {
+                        ProgressView(value: modelsVM.downloadProgress(model.id))
+                            .frame(width: 80)
+                        Text("\(Int(modelsVM.downloadProgress(model.id) * 100))%")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                } else if model.downloaded {
+                    HStack(spacing: 8) {
+                        Text("Downloaded")
+                            .font(.caption)
+                            .foregroundStyle(.green)
+
+                        Button {
+                            modelsVM.confirmDelete(model: model)
+                        } label: {
+                            Image(systemName: "trash")
+                                .font(.caption)
+                        }
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(.red.opacity(0.7))
+                        .help("Delete model to free disk space")
+                    }
+                } else {
+                    Button {
+                        modelsVM.startDownload(modelId: model.id, service: backendService)
+                    } label: {
+                        Label("Download", systemImage: "arrow.down.circle")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
             }
-
-            Spacer()
-
-            // Size badge
-            Text(model.sizeLabel)
-                .font(.caption)
-                .fontWeight(.medium)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .background(Color.accentColor.opacity(0.12))
-                .clipShape(RoundedRectangle(cornerRadius: 5))
-
-            // Status label
-            Text(model.loaded ? "Loaded" : "Not Loaded")
-                .font(.caption)
-                .foregroundStyle(model.loaded ? .green : .secondary)
-                .frame(width: 70, alignment: .trailing)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)

@@ -21,6 +21,8 @@ from pydantic import BaseModel, Field
 
 from engine.memory_manager import aggressive_cleanup, get_memory_stats
 from engine.model_manager import ModelManager
+from engine.model_download_manager import ModelDownloadManager
+import history_store
 from engine.pipelines.text_to_video import TextToVideoPipeline
 from engine.pipelines.preview import PreviewPipeline
 from engine.pipelines.image_to_video import ImageToVideoPipeline
@@ -37,6 +39,7 @@ log = logging.getLogger(__name__)
 # --- Global state ---
 
 model_manager = ModelManager()
+model_download_manager = ModelDownloadManager()
 t2v_pipeline = TextToVideoPipeline(model_manager)
 preview_pipeline = PreviewPipeline(model_manager)
 i2v_pipeline = ImageToVideoPipeline(model_manager)
@@ -303,6 +306,137 @@ async def memory_stats():
     return MemoryResponse(**stats)
 
 
+# --- Model management endpoints ---
+
+
+class ModelInfoResponse(BaseModel):
+    """Information about a single model."""
+
+    id: str
+    name: str
+    description: str
+    size_gb: float
+    model_type: str
+    downloaded: bool
+    hf_repo: str
+
+
+class ModelListResponse(BaseModel):
+    """List of models with total disk usage."""
+
+    models: list[ModelInfoResponse]
+    total_disk_gb: float
+
+
+class ModelDownloadRequest(BaseModel):
+    """Request to download a model."""
+
+    model_id: str = Field(..., min_length=1)
+
+
+class ModelDownloadResponse(BaseModel):
+    """Response with download tracking ID."""
+
+    download_id: str
+    model_id: str
+
+
+class DownloadStatusResponse(BaseModel):
+    """Download progress status."""
+
+    download_id: str
+    model_id: str
+    status: str  # pending, downloading, completed, failed
+    progress: float  # 0.0 to 1.0
+    error: str | None = None
+
+
+class ModelDeleteResponse(BaseModel):
+    """Response after deleting a model."""
+
+    success: bool
+    model_id: str
+    freed_gb: float
+    message: str
+
+
+@app.get("/api/v1/models", response_model=ModelListResponse)
+async def list_models():
+    """List all known models with download status and size."""
+    models = model_download_manager.list_models()
+    total = sum(m["size_gb"] for m in models if m["downloaded"])
+    return ModelListResponse(
+        models=[ModelInfoResponse(**m) for m in models],
+        total_disk_gb=round(total, 2),
+    )
+
+
+@app.post("/api/v1/models/download", response_model=ModelDownloadResponse)
+async def download_model(req: ModelDownloadRequest):
+    """Start downloading a model asynchronously."""
+    model = model_download_manager.get_model(req.model_id)
+    if model is None:
+        raise HTTPException(status_code=404, detail=f"Unknown model: {req.model_id}")
+    if model["downloaded"]:
+        raise HTTPException(
+            status_code=400, detail=f"Model already downloaded: {req.model_id}"
+        )
+
+    download_id = str(uuid.uuid4())[:8]
+    model_download_manager.start_download(download_id, req.model_id)
+
+    asyncio.create_task(_run_download(download_id, req.model_id))
+
+    return ModelDownloadResponse(download_id=download_id, model_id=req.model_id)
+
+
+async def _run_download(download_id: str, model_id: str) -> None:
+    """Execute model download in background thread."""
+    try:
+        await asyncio.get_event_loop().run_in_executor(
+            None, model_download_manager.download_model, download_id, model_id
+        )
+    except Exception as e:
+        log.error("Download %s failed: %s", download_id, e)
+        model_download_manager.fail_download(download_id, str(e))
+
+
+@app.get(
+    "/api/v1/models/download/{download_id}/status",
+    response_model=DownloadStatusResponse,
+)
+async def download_status(download_id: str):
+    """Check download progress."""
+    status = model_download_manager.get_download_status(download_id)
+    if status is None:
+        raise HTTPException(
+            status_code=404, detail=f"Unknown download: {download_id}"
+        )
+    return DownloadStatusResponse(**status)
+
+
+@app.delete("/api/v1/models/{model_id}", response_model=ModelDeleteResponse)
+async def delete_model(model_id: str):
+    """Delete a downloaded model to free disk space."""
+    model = model_download_manager.get_model(model_id)
+    if model is None:
+        raise HTTPException(status_code=404, detail=f"Unknown model: {model_id}")
+    if not model["downloaded"]:
+        raise HTTPException(
+            status_code=400, detail=f"Model not downloaded: {model_id}"
+        )
+
+    freed = await asyncio.get_event_loop().run_in_executor(
+        None, model_download_manager.delete_model, model_id
+    )
+    return ModelDeleteResponse(
+        success=True,
+        model_id=model_id,
+        freed_gb=round(freed, 2),
+        message=f"Deleted {model_id}, freed {freed:.2f} GB",
+    )
+
+
 # --- Generation endpoints ---
 
 @app.post("/api/v1/generate/text-to-video", response_model=JobResponse)
@@ -341,6 +475,7 @@ async def generate_i2v(req: I2VRequest):
 async def _run_t2v(job_id: str, req: T2VRequest) -> None:
     """Execute T2V generation in background."""
     jobs[job_id]["status"] = "running"
+    resolved_seed = _resolve_seed(req.seed)
 
     async def progress_cb(step: int, total: int, pct: float, preview_frame: str | None = None, *, status: str | None = None) -> None:
         jobs[job_id]["progress"] = pct
@@ -353,7 +488,7 @@ async def _run_t2v(job_id: str, req: T2VRequest) -> None:
             height=req.height,
             num_frames=req.num_frames,
             steps=req.steps,
-            seed=_resolve_seed(req.seed),
+            seed=resolved_seed,
             guidance_scale=req.guidance_scale,
             fps=req.fps,
             upscale=req.upscale,
@@ -371,6 +506,19 @@ async def _run_t2v(job_id: str, req: T2VRequest) -> None:
         await _broadcast_progress(job_id, 0, 0, 1.0, done=True)
         log.info("Job %s completed in %.2fs", job_id, result.duration_seconds)
 
+        history_store.add_entry(
+            job_id=job_id,
+            prompt=req.prompt,
+            output_path=result.output_path,
+            duration_seconds=result.duration_seconds,
+            width=req.width,
+            height=req.height,
+            num_frames=req.num_frames,
+            fps=req.fps,
+            seed=resolved_seed,
+            generation_type="t2v",
+        )
+
     except Exception as e:
         jobs[job_id]["status"] = "failed"
         jobs[job_id]["error"] = str(e)
@@ -381,6 +529,7 @@ async def _run_t2v(job_id: str, req: T2VRequest) -> None:
 async def _run_preview(job_id: str, req: PreviewRequest) -> None:
     """Execute rapid preview generation in background."""
     jobs[job_id]["status"] = "running"
+    resolved_seed = _resolve_seed(req.seed)
 
     async def progress_cb(step: int, total: int, pct: float, preview_frame: str | None = None, *, status: str | None = None) -> None:
         jobs[job_id]["progress"] = pct
@@ -389,7 +538,7 @@ async def _run_preview(job_id: str, req: PreviewRequest) -> None:
     try:
         result = await preview_pipeline.generate(
             prompt=req.prompt,
-            seed=_resolve_seed(req.seed),
+            seed=resolved_seed,
             fps=req.fps,
             image=req.source_image_path,
             image_strength=req.image_strength,
@@ -408,6 +557,19 @@ async def _run_preview(job_id: str, req: PreviewRequest) -> None:
         await _broadcast_progress(job_id, 0, 0, 1.0, done=True)
         log.info("Preview %s completed in %.2fs", job_id, result.duration_seconds)
 
+        history_store.add_entry(
+            job_id=job_id,
+            prompt=req.prompt,
+            output_path=result.output_path,
+            duration_seconds=result.duration_seconds,
+            width=384,
+            height=256,
+            num_frames=9,
+            fps=req.fps,
+            seed=resolved_seed,
+            generation_type="preview",
+        )
+
     except Exception as e:
         jobs[job_id]["status"] = "failed"
         jobs[job_id]["error"] = str(e)
@@ -418,6 +580,7 @@ async def _run_preview(job_id: str, req: PreviewRequest) -> None:
 async def _run_i2v(job_id: str, req: I2VRequest) -> None:
     """Execute I2V generation in background."""
     jobs[job_id]["status"] = "running"
+    resolved_seed = _resolve_seed(req.seed)
 
     async def progress_cb(step: int, total: int, pct: float, preview_frame: str | None = None, *, status: str | None = None) -> None:
         jobs[job_id]["progress"] = pct
@@ -431,7 +594,7 @@ async def _run_i2v(job_id: str, req: I2VRequest) -> None:
             height=req.height,
             num_frames=req.num_frames,
             steps=req.steps,
-            seed=_resolve_seed(req.seed),
+            seed=resolved_seed,
             guidance_scale=req.guidance_scale,
             fps=req.fps,
             image_strength=req.image_strength,
@@ -449,6 +612,19 @@ async def _run_i2v(job_id: str, req: I2VRequest) -> None:
         }
         await _broadcast_progress(job_id, 0, 0, 1.0, done=True)
         log.info("I2V %s completed in %.2fs", job_id, result.duration_seconds)
+
+        history_store.add_entry(
+            job_id=job_id,
+            prompt=req.prompt,
+            output_path=result.output_path,
+            duration_seconds=result.duration_seconds,
+            width=req.width,
+            height=req.height,
+            num_frames=req.num_frames,
+            fps=req.fps,
+            seed=resolved_seed,
+            generation_type="i2v",
+        )
 
     except Exception as e:
         jobs[job_id]["status"] = "failed"
@@ -604,6 +780,27 @@ async def get_job(job_id: str):
     if job_id not in jobs:
         return {"error": "Job not found"}
     return jobs[job_id]
+
+
+# --- History endpoints ---
+
+@app.get("/api/v1/history")
+async def get_history(limit: int = 100):
+    """Return generation history, newest first.
+
+    Args:
+        limit: Maximum number of entries to return (default 100).
+    """
+    return history_store.get_entries(limit=min(limit, 100))
+
+
+@app.delete("/api/v1/history/{job_id}")
+async def delete_history_entry(job_id: str):
+    """Remove a history entry by job_id."""
+    found = history_store.delete_entry(job_id)
+    if not found:
+        raise HTTPException(status_code=404, detail=f"History entry '{job_id}' not found")
+    return {"success": True}
 
 
 # --- WebSocket progress ---

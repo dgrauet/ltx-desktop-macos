@@ -45,7 +45,15 @@ struct HistoryView: View {
 
     private var gridPanel: some View {
         Group {
-            if vm.videos.isEmpty {
+            if vm.isLoading && vm.videos.isEmpty {
+                VStack(spacing: 12) {
+                    ProgressView()
+                    Text("Loading history...")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if vm.videos.isEmpty {
                 emptyState
             } else {
                 ScrollView {
@@ -172,12 +180,20 @@ struct VideoCard: View {
 
             // Metadata
             VStack(alignment: .leading, spacing: 2) {
-                Text(item.jobId)
+                Text(item.prompt == "(no prompt)" ? item.jobId : item.prompt)
                     .font(.caption)
                     .fontWeight(.medium)
-                    .lineLimit(1)
+                    .lineLimit(2)
 
                 HStack(spacing: 4) {
+                    Text(item.generationTypeLabel)
+                        .font(.caption2)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(generationTypeColor(item.generationType).opacity(0.15))
+                        .foregroundStyle(generationTypeColor(item.generationType))
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+
                     Text(item.resolutionLabel)
                         .font(.caption2)
                         .padding(.horizontal, 5)
@@ -186,12 +202,12 @@ struct VideoCard: View {
                         .clipShape(RoundedRectangle(cornerRadius: 4))
 
                     Spacer()
-
-                    Text(Self.dateFormatter.string(from: item.createdAt))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
                 }
+
+                Text(Self.dateFormatter.string(from: item.createdAt))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
             .padding(.horizontal, 4)
         }
@@ -209,6 +225,15 @@ struct VideoCard: View {
                     lineWidth: 2
                 )
         )
+    }
+
+    private func generationTypeColor(_ type: String) -> Color {
+        switch type {
+        case "t2v": return .blue
+        case "i2v": return .green
+        case "preview": return .orange
+        default: return .secondary
+        }
     }
 }
 
@@ -254,6 +279,7 @@ struct VideoDetailView: View {
                         .padding(.top, 12)
 
                     metadataRow(label: "Job ID", value: item.jobId)
+                    metadataRow(label: "Type", value: item.generationTypeLabel)
                     metadataRow(label: "Resolution", value: item.resolutionLabel)
                     metadataRow(label: "Frames", value: "\(item.numFrames) @ \(item.fps) fps")
                     if item.durationSeconds > 0 {

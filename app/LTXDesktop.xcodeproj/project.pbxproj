@@ -29,6 +29,7 @@
 		A100000012 /* GenerationRequests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000012 /* GenerationRequests.swift */; };
 		A100000013 /* LoRAInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000013 /* LoRAInfo.swift */; };
 		A100000014 /* ExportRequests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000014 /* ExportRequests.swift */; };
+		A100000015 /* ModelsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000015 /* ModelsViewModel.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -55,6 +56,7 @@
 		A200000012 /* GenerationRequests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerationRequests.swift; sourceTree = "<group>"; };
 		A200000013 /* LoRAInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoRAInfo.swift; sourceTree = "<group>"; };
 		A200000014 /* ExportRequests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportRequests.swift; sourceTree = "<group>"; };
+		A200000015 /* ModelsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelsViewModel.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -109,6 +111,7 @@
 				A20000000C /* HistoryViewModel.swift */,
 				A20000000D /* LoRAViewModel.swift */,
 				A20000000E /* MemoryViewModel.swift */,
+				A200000015 /* ModelsViewModel.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -243,6 +246,7 @@
 				A100000012 /* GenerationRequests.swift in Sources */,
 				A100000013 /* LoRAInfo.swift in Sources */,
 				A100000014 /* ExportRequests.swift in Sources */,
+				A100000015 /* ModelsViewModel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

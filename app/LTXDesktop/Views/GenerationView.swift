@@ -170,14 +170,41 @@ struct GenerationView: View {
                     }
                 }
 
-                // Upscale toggle (full generation only, ignored for preview)
-                Toggle(isOn: $vm.upscale) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("2x Upscale")
-                            .font(.subheadline)
-                        Text("Full gen only — \(vm.selectedResolution.width * 2)x\(vm.selectedResolution.height * 2)")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+                // Neural Upscale toggle
+                VStack(alignment: .leading, spacing: 4) {
+                    Toggle(isOn: $vm.upscale) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Neural Upscale 2×")
+                                .font(.subheadline)
+                            Text("Generates at half resolution then upscales with neural network. Better quality at high resolutions.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+
+                    // Warning: high resolution without upscale
+                    if !vm.upscale && vm.selectedResolution.needsUpscaleWarning {
+                        HStack(spacing: 4) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                                .font(.caption)
+                            Text("High resolution without upscale may be slow")
+                                .font(.caption2)
+                                .foregroundStyle(.orange)
+                        }
+                    }
+
+                    // Warning: Full HD on 32GB
+                    if vm.selectedResolution.isFullHD {
+                        HStack(spacing: 4) {
+                            Image(systemName: "memorychip")
+                                .foregroundStyle(.red)
+                                .font(.caption)
+                            Text("Full HD requires 64GB+ RAM")
+                                .font(.caption2)
+                                .foregroundStyle(.red)
+                        }
                     }
                 }
 

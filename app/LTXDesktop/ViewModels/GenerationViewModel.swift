@@ -31,7 +31,17 @@ class GenerationViewModel: ObservableObject {
         case portraitHD = "1080x1920"
 
         var id: String { rawValue }
-        var label: String { rawValue }
+
+        var label: String {
+            switch self {
+            case .landscape768: return "768×512"
+            case .portrait512: return "512×768"
+            case .landscape1280: return "1280×704 HD"
+            case .portrait704: return "704×1280 HD"
+            case .fullHD: return "1920×1080 Full HD"
+            case .portraitHD: return "1080×1920 Full HD"
+            }
+        }
 
         var width: Int {
             switch self {
@@ -52,6 +62,22 @@ class GenerationViewModel: ObservableObject {
             case .portrait704: return 1280
             case .fullHD: return 1080
             case .portraitHD: return 1920
+            }
+        }
+
+        /// Whether this resolution benefits from the two-stage upscale pipeline.
+        var needsUpscaleWarning: Bool {
+            switch self {
+            case .landscape1280, .portrait704, .fullHD, .portraitHD: return true
+            default: return false
+            }
+        }
+
+        /// Whether this is a Full HD resolution (needs 64GB+ RAM warning).
+        var isFullHD: Bool {
+            switch self {
+            case .fullHD, .portraitHD: return true
+            default: return false
             }
         }
     }
