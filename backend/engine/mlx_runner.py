@@ -283,6 +283,7 @@ async def run_mlx_generation(
     ffmpeg_upscale: bool = False,
     preview_interval: int = 0,
     skip_bwe: bool = True,
+    lora_args: list[str] | None = None,
     progress_callback: Callable[..., Awaitable[None]] | None = None,
     venv_python: str | None = None,
 ) -> dict:
@@ -402,6 +403,10 @@ async def run_mlx_generation(
 
     if image is not None:
         cmd.extend(["--image", image, "--image-strength", str(image_strength)])
+
+    # Append LoRA arguments (--lora path:strength, can be repeated)
+    if lora_args:
+        cmd.extend(lora_args)
 
     is_two_stage = False
     if upscale and model_version == "2.3":

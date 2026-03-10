@@ -63,11 +63,55 @@ struct JobResponse: Codable {
     }
 }
 
+/// Response after submitting a job to the priority queue.
+struct QueueSubmitResponse: Codable {
+    let jobId: String
+    let position: Int
+    let queueLength: Int
+
+    enum CodingKeys: String, CodingKey {
+        case jobId = "job_id"
+        case position
+        case queueLength = "queue_length"
+    }
+}
+
+/// A single entry from GET /api/v1/queue.
+struct QueueEntry: Codable, Identifiable {
+    let jobId: String
+    let jobType: String
+    let priority: String
+    let state: String
+    let position: Int
+    let prompt: String
+    let submittedAt: Double
+    let etaSeconds: Double?
+    var progress: Double?
+    var status: String?
+
+    var id: String { jobId }
+
+    enum CodingKeys: String, CodingKey {
+        case jobId = "job_id"
+        case jobType = "job_type"
+        case priority, state, position, prompt, progress, status
+        case submittedAt = "submitted_at"
+        case etaSeconds = "eta_seconds"
+    }
+}
+
 struct JobStatus: Codable {
     let status: String
     let progress: Double
     let result: JobResult?
     let error: String?
+    let position: Int?
+    let etaSeconds: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case status, progress, result, error, position
+        case etaSeconds = "eta_seconds"
+    }
 }
 
 struct JobResult: Codable {
@@ -97,11 +141,16 @@ struct ProgressUpdate: Codable {
     let error: String?
     let previewFrame: String?
     let status: String?
+    let queueLength: Int?
+    let position: Int?
+    let etaSeconds: Double?
 
     enum CodingKeys: String, CodingKey {
-        case step, pct, done, error, status
+        case step, pct, done, error, status, position
         case jobId = "job_id"
         case totalSteps = "total_steps"
         case previewFrame = "preview_frame"
+        case queueLength = "queue_length"
+        case etaSeconds = "eta_seconds"
     }
 }

@@ -8,9 +8,10 @@ struct LoRAInfo: Identifiable, Codable {
     let compatible: Bool
     var loaded: Bool
     let sizeMb: Double
+    var strength: Double
 
     enum CodingKeys: String, CodingKey {
-        case id, name, path, compatible, loaded
+        case id, name, path, compatible, loaded, strength
         case loraType = "lora_type"
         case sizeMb = "size_mb"
     }

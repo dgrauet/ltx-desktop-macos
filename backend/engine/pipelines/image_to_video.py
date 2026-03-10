@@ -49,6 +49,7 @@ class ImageToVideoPipeline:
         fps: int = 24,
         image_strength: float = 0.85,
         upscale: bool = False,
+        lora_args: list[str] | None = None,
         progress_callback: Callable[[int, int, float, str | None], None] | None = None,
     ) -> GenerationResult:
         """Run the I2V generation pipeline.
@@ -119,6 +120,7 @@ class ImageToVideoPipeline:
             image_strength=image_strength,
             tiling="auto",
             upscale=upscale,
+            lora_args=lora_args,
             preview_interval=2,
             progress_callback=_progress_adapter,
         )

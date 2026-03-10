@@ -3,6 +3,7 @@
 Sprint 1: system endpoints, T2V generation, WebSocket progress.
 Sprint 2: preview, I2V, intermediate frame streaming.
 Sprint 4: LoRA management, audio (TTS/music/mix), video export, FCPXML export.
+Sprint 5: Batch generation queue with priority management.
 """
 
 from __future__ import annotations
@@ -32,6 +33,7 @@ from engine.prompt_enhancer import PromptEnhancer
 from engine.lora_manager import LoRAManager
 from audio.tts_engine import TTSEngine
 from audio.audio_mixer import AudioMixer
+from job_queue import JobQueue, Priority
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
@@ -50,18 +52,21 @@ lora_manager = LoRAManager(model_manager)
 tts_engine = TTSEngine()
 audio_mixer = AudioMixer()
 
-# Job tracking: job_id -> {status, progress, result, error}
+# Job tracking: job_id -> {status, progress, result, error, job_type, prompt, priority}
 jobs: dict[str, dict[str, Any]] = {}
 
 # WebSocket connections per job
 ws_connections: dict[str, list[WebSocket]] = {}
+
+# Priority job queue — one GPU job at a time
+job_queue = JobQueue()
 
 
 # --- Lifespan ---
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup: load model stub, warm up, seed history. Shutdown: unload."""
+    """Startup: load model stub, warm up, seed history, start queue. Shutdown: unload."""
     log.info("Starting LTX Desktop backend...")
     model_manager.load_model("notapalindrome/ltx2-mlx-av")
     aggressive_cleanup()
@@ -69,9 +74,12 @@ async def lifespan(app: FastAPI):
     seeded = history_store.seed_from_existing_files()
     if seeded:
         log.info("Seeded %d existing videos into history", seeded)
+    # Start the job queue processor
+    await job_queue.start()
     log.info("Backend ready")
     yield
     log.info("Shutting down...")
+    await job_queue.stop()
     model_manager.unload_all()
 
 
@@ -156,9 +164,21 @@ class ExtendRequest(BaseModel):
     fps: int = Field(default=24, ge=1, le=60)
 
 
+class QueueSubmitResponse(BaseModel):
+    """Response after submitting a job to the queue."""
+    job_id: str
+    position: int
+    queue_length: int
+
+
 class JobResponse(BaseModel):
     """Response with a job ID."""
     job_id: str
+
+
+class PriorityRequest(BaseModel):
+    """Request to change a job's priority."""
+    priority: str = Field(..., pattern="^(high|normal|low)$")
 
 
 def _resolve_seed(seed: int) -> int:
@@ -193,7 +213,7 @@ class MemoryResponse(BaseModel):
     next_reload_in: int
 
 
-class LoRAInfo(BaseModel):
+class LoRAInfoResponse(BaseModel):
     """LoRA metadata."""
     id: str
     name: str
@@ -202,11 +222,23 @@ class LoRAInfo(BaseModel):
     compatible: bool
     loaded: bool
     size_mb: float
+    strength: float = 0.7
 
 
 class LoadLoRARequest(BaseModel):
-    """Request to load a LoRA by ID."""
+    """Request to load a LoRA by ID with optional strength."""
     lora_id: str = Field(..., min_length=1)
+    strength: float = Field(default=0.7, ge=0.0, le=1.0)
+
+
+class UpdateLoRAStrengthRequest(BaseModel):
+    """Request to update a LoRA's strength."""
+    strength: float = Field(..., ge=0.0, le=1.0)
+
+
+class ImportLoRARequest(BaseModel):
+    """Request to import a LoRA from a file path."""
+    source_path: str = Field(..., min_length=1)
 
 
 class TTSRequest(BaseModel):
@@ -441,39 +473,96 @@ async def delete_model(model_id: str):
     )
 
 
+# --- Helper: map priority string to enum ---
+
+_PRIORITY_MAP: dict[str, Priority] = {
+    "high": Priority.HIGH,
+    "normal": Priority.NORMAL,
+    "low": Priority.LOW,
+}
+
+
 # --- Generation endpoints ---
 
-@app.post("/api/v1/generate/text-to-video", response_model=JobResponse)
-async def generate_t2v(req: T2VRequest):
-    """Start a text-to-video generation job."""
+@app.post("/api/v1/generate/text-to-video", response_model=QueueSubmitResponse)
+async def generate_t2v(req: T2VRequest, priority: str = "normal"):
+    """Submit a text-to-video generation job to the queue.
+
+    Args:
+        req: Generation parameters.
+        priority: Job priority (high, normal, low). Default: normal.
+    """
     job_id = str(uuid.uuid4())[:8]
-    jobs[job_id] = {"status": "queued", "progress": 0.0, "result": None, "error": None}
+    pri = _PRIORITY_MAP.get(priority, Priority.NORMAL)
+    jobs[job_id] = {
+        "status": "queued", "progress": 0.0, "result": None, "error": None,
+        "job_type": "t2v", "prompt": req.prompt, "priority": priority,
+    }
 
-    asyncio.create_task(_run_t2v(job_id, req))
+    position = await job_queue.submit(
+        job_id=job_id,
+        job_type="t2v",
+        priority=pri,
+        prompt=req.prompt,
+        coroutine_factory=lambda jid=job_id, r=req: _run_t2v(jid, r),
+    )
 
-    return JobResponse(job_id=job_id)
+    return QueueSubmitResponse(
+        job_id=job_id, position=position, queue_length=job_queue.get_queue_length(),
+    )
 
 
-@app.post("/api/v1/generate/preview", response_model=JobResponse)
+@app.post("/api/v1/generate/preview", response_model=QueueSubmitResponse)
 async def generate_preview(req: PreviewRequest):
-    """Start a rapid preview generation job (384x256, 4 steps)."""
+    """Submit a rapid preview generation job (384x256, 4 steps).
+
+    Preview jobs always get HIGH priority and auto-cancel previous previews.
+    """
     job_id = str(uuid.uuid4())[:8]
-    jobs[job_id] = {"status": "queued", "progress": 0.0, "result": None, "error": None}
+    jobs[job_id] = {
+        "status": "queued", "progress": 0.0, "result": None, "error": None,
+        "job_type": "preview", "prompt": req.prompt, "priority": "high",
+    }
 
-    asyncio.create_task(_run_preview(job_id, req))
+    position = await job_queue.submit(
+        job_id=job_id,
+        job_type="preview",
+        priority=Priority.HIGH,
+        prompt=req.prompt,
+        coroutine_factory=lambda jid=job_id, r=req: _run_preview(jid, r),
+    )
 
-    return JobResponse(job_id=job_id)
+    return QueueSubmitResponse(
+        job_id=job_id, position=position, queue_length=job_queue.get_queue_length(),
+    )
 
 
-@app.post("/api/v1/generate/image-to-video", response_model=JobResponse)
-async def generate_i2v(req: I2VRequest):
-    """Start an image-to-video generation job."""
+@app.post("/api/v1/generate/image-to-video", response_model=QueueSubmitResponse)
+async def generate_i2v(req: I2VRequest, priority: str = "normal"):
+    """Submit an image-to-video generation job to the queue.
+
+    Args:
+        req: Generation parameters.
+        priority: Job priority (high, normal, low). Default: normal.
+    """
     job_id = str(uuid.uuid4())[:8]
-    jobs[job_id] = {"status": "queued", "progress": 0.0, "result": None, "error": None}
+    pri = _PRIORITY_MAP.get(priority, Priority.NORMAL)
+    jobs[job_id] = {
+        "status": "queued", "progress": 0.0, "result": None, "error": None,
+        "job_type": "i2v", "prompt": req.prompt, "priority": priority,
+    }
 
-    asyncio.create_task(_run_i2v(job_id, req))
+    position = await job_queue.submit(
+        job_id=job_id,
+        job_type="i2v",
+        priority=pri,
+        prompt=req.prompt,
+        coroutine_factory=lambda jid=job_id, r=req: _run_i2v(jid, r),
+    )
 
-    return JobResponse(job_id=job_id)
+    return QueueSubmitResponse(
+        job_id=job_id, position=position, queue_length=job_queue.get_queue_length(),
+    )
 
 
 async def _run_t2v(job_id: str, req: T2VRequest) -> None:
@@ -496,6 +585,7 @@ async def _run_t2v(job_id: str, req: T2VRequest) -> None:
             guidance_scale=req.guidance_scale,
             fps=req.fps,
             upscale=req.upscale,
+            lora_args=lora_manager.get_active_lora_args() or None,
             progress_callback=progress_cb,
         )
         jobs[job_id]["status"] = "completed"
@@ -547,6 +637,7 @@ async def _run_preview(job_id: str, req: PreviewRequest) -> None:
             image=req.source_image_path,
             image_strength=req.image_strength,
             upscale=req.upscale,
+            lora_args=lora_manager.get_active_lora_args() or None,
             progress_callback=progress_cb,
         )
         jobs[job_id]["status"] = "completed"
@@ -603,6 +694,7 @@ async def _run_i2v(job_id: str, req: I2VRequest) -> None:
             fps=req.fps,
             image_strength=req.image_strength,
             upscale=req.upscale,
+            lora_args=lora_manager.get_active_lora_args() or None,
             progress_callback=progress_cb,
         )
         jobs[job_id]["status"] = "completed"
@@ -637,26 +729,50 @@ async def _run_i2v(job_id: str, req: I2VRequest) -> None:
         await _broadcast_progress(job_id, 0, 0, 0.0, error=str(e))
 
 
-@app.post("/api/v1/generate/retake", response_model=JobResponse)
-async def generate_retake(req: RetakeRequest):
-    """Start a retake (segment regeneration) job."""
+@app.post("/api/v1/generate/retake", response_model=QueueSubmitResponse)
+async def generate_retake(req: RetakeRequest, priority: str = "normal"):
+    """Submit a retake (segment regeneration) job to the queue."""
     job_id = str(uuid.uuid4())[:8]
-    jobs[job_id] = {"status": "queued", "progress": 0.0, "result": None, "error": None}
+    pri = _PRIORITY_MAP.get(priority, Priority.NORMAL)
+    jobs[job_id] = {
+        "status": "queued", "progress": 0.0, "result": None, "error": None,
+        "job_type": "retake", "prompt": req.prompt, "priority": priority,
+    }
 
-    asyncio.create_task(_run_retake(job_id, req))
+    position = await job_queue.submit(
+        job_id=job_id,
+        job_type="retake",
+        priority=pri,
+        prompt=req.prompt,
+        coroutine_factory=lambda jid=job_id, r=req: _run_retake(jid, r),
+    )
 
-    return JobResponse(job_id=job_id)
+    return QueueSubmitResponse(
+        job_id=job_id, position=position, queue_length=job_queue.get_queue_length(),
+    )
 
 
-@app.post("/api/v1/generate/extend", response_model=JobResponse)
-async def generate_extend(req: ExtendRequest):
-    """Start a video extension job."""
+@app.post("/api/v1/generate/extend", response_model=QueueSubmitResponse)
+async def generate_extend(req: ExtendRequest, priority: str = "normal"):
+    """Submit a video extension job to the queue."""
     job_id = str(uuid.uuid4())[:8]
-    jobs[job_id] = {"status": "queued", "progress": 0.0, "result": None, "error": None}
+    pri = _PRIORITY_MAP.get(priority, Priority.NORMAL)
+    jobs[job_id] = {
+        "status": "queued", "progress": 0.0, "result": None, "error": None,
+        "job_type": "extend", "prompt": req.prompt, "priority": priority,
+    }
 
-    asyncio.create_task(_run_extend(job_id, req))
+    position = await job_queue.submit(
+        job_id=job_id,
+        job_type="extend",
+        priority=pri,
+        prompt=req.prompt,
+        coroutine_factory=lambda jid=job_id, r=req: _run_extend(jid, r),
+    )
 
-    return JobResponse(job_id=job_id)
+    return QueueSubmitResponse(
+        job_id=job_id, position=position, queue_length=job_queue.get_queue_length(),
+    )
 
 
 async def _run_retake(job_id: str, req: RetakeRequest) -> None:
@@ -762,28 +878,92 @@ async def enhance_prompt(req: EnhanceRequest):
 
 @app.get("/api/v1/queue")
 async def list_queue():
-    """List all jobs and their status."""
-    return [
-        {"job_id": jid, "status": info["status"], "progress": info["progress"]}
-        for jid, info in jobs.items()
-    ]
+    """Return the current queue state with positions, ETA, and progress.
+
+    Returns a list of jobs sorted by execution order: running job first,
+    then queued jobs in priority order.
+    """
+    queue_state = job_queue.get_queue_state()
+
+    # Enrich with progress from jobs dict
+    for item in queue_state:
+        jid = item["job_id"]
+        if jid in jobs:
+            item["progress"] = jobs[jid]["progress"]
+            item["status"] = jobs[jid]["status"]
+        else:
+            item["progress"] = 0.0
+
+    return queue_state
 
 
 @app.post("/api/v1/queue/{job_id}/cancel")
 async def cancel_job(job_id: str):
-    """Cancel a queued or running job."""
+    """Cancel a queued or running job.
+
+    For queued jobs, removes them from the queue.
+    For running jobs, cancels the asyncio task.
+    """
     if job_id not in jobs:
-        return {"success": False, "error": "Job not found"}
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    success = await job_queue.cancel(job_id)
+    if success:
+        jobs[job_id]["status"] = "cancelled"
+        await _broadcast_progress(job_id, 0, 0, 0.0, error="Cancelled by user")
+        return {"success": True}
+
+    # Job might already be completed/failed
+    if jobs[job_id]["status"] in ("completed", "failed", "cancelled"):
+        return {"success": False, "error": f"Job already {jobs[job_id]['status']}"}
+
     jobs[job_id]["status"] = "cancelled"
     return {"success": True}
 
 
+@app.post("/api/v1/queue/{job_id}/priority")
+async def change_priority(job_id: str, req: PriorityRequest):
+    """Change the priority of a queued job.
+
+    Only works for jobs that are still queued (not running or completed).
+    """
+    if job_id not in jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    new_pri = _PRIORITY_MAP.get(req.priority)
+    if new_pri is None:
+        raise HTTPException(status_code=400, detail=f"Invalid priority: {req.priority}")
+
+    success = await job_queue.reorder(job_id, new_pri)
+    if not success:
+        raise HTTPException(
+            status_code=400,
+            detail="Job cannot be reordered (not in queued state)",
+        )
+
+    jobs[job_id]["priority"] = req.priority
+    return {"success": True, "new_priority": req.priority}
+
+
 @app.get("/api/v1/queue/{job_id}")
 async def get_job(job_id: str):
-    """Get status of a specific job."""
+    """Get status of a specific job including queue position."""
     if job_id not in jobs:
-        return {"error": "Job not found"}
-    return jobs[job_id]
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    result = dict(jobs[job_id])
+
+    # Add queue position if still queued
+    queued_job = job_queue.get_job(job_id)
+    if queued_job is not None and queued_job.state == "queued":
+        queue_state = job_queue.get_queue_state()
+        for item in queue_state:
+            if item["job_id"] == job_id:
+                result["position"] = item["position"]
+                result["eta_seconds"] = item.get("eta_seconds")
+                break
+
+    return result
 
 
 # --- History endpoints ---
@@ -819,13 +999,23 @@ async def ws_progress(websocket: WebSocket, job_id: str):
     ws_connections[job_id].append(websocket)
 
     try:
-        # Send current state immediately
+        # Send current state immediately, including queue position
         if job_id in jobs:
-            await websocket.send_json({
+            msg: dict[str, Any] = {
                 "job_id": job_id,
                 "status": jobs[job_id]["status"],
                 "progress": jobs[job_id]["progress"],
-            })
+                "queue_length": job_queue.get_queue_length(),
+            }
+            # Add position if queued
+            queued_job = job_queue.get_job(job_id)
+            if queued_job is not None and queued_job.state == "queued":
+                for item in job_queue.get_queue_state():
+                    if item["job_id"] == job_id:
+                        msg["position"] = item["position"]
+                        msg["eta_seconds"] = item.get("eta_seconds")
+                        break
+            await websocket.send_json(msg)
 
         # Keep connection alive until client disconnects
         while True:
@@ -862,6 +1052,7 @@ async def _broadcast_progress(
         "memory": memory,
         "done": done,
         "error": error,
+        "queue_length": job_queue.get_queue_length(),
     }
 
     if preview_frame is not None:
@@ -883,19 +1074,22 @@ async def _broadcast_progress(
 
 # --- LoRA endpoints ---
 
-@app.get("/api/v1/loras", response_model=list[LoRAInfo])
+@app.get("/api/v1/loras", response_model=list[LoRAInfoResponse])
 async def list_loras():
-    """List all available LoRAs."""
+    """List all available LoRAs with metadata and loaded state."""
     loras = lora_manager.list_loras()
-    return [LoRAInfo(**vars(lora)) for lora in loras]
+    return [LoRAInfoResponse(**vars(lora)) for lora in loras]
 
 
 @app.post("/api/v1/loras/load", response_model=SuccessResponse)
 async def load_lora(req: LoadLoRARequest):
-    """Load (activate) a LoRA by ID."""
+    """Load (activate) a LoRA by ID with optional strength."""
     try:
-        lora_manager.load_lora(req.lora_id)
-        return SuccessResponse(success=True, message=f"LoRA '{req.lora_id}' loaded")
+        lora_manager.load_lora(req.lora_id, strength=req.strength)
+        return SuccessResponse(
+            success=True,
+            message=f"LoRA '{req.lora_id}' loaded (strength={req.strength:.2f})",
+        )
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail=f"LoRA '{req.lora_id}' not found")
     except ValueError as e:
@@ -907,6 +1101,28 @@ async def unload_lora(lora_id: str):
     """Unload (deactivate) a LoRA by ID."""
     lora_manager.unload_lora(lora_id)
     return SuccessResponse(success=True, message=f"LoRA '{lora_id}' unloaded")
+
+
+@app.put("/api/v1/loras/{lora_id}/strength", response_model=SuccessResponse)
+async def update_lora_strength(lora_id: str, req: UpdateLoRAStrengthRequest):
+    """Update the strength of an active LoRA."""
+    lora_manager.update_strength(lora_id, req.strength)
+    return SuccessResponse(
+        success=True,
+        message=f"LoRA '{lora_id}' strength updated to {req.strength:.2f}",
+    )
+
+
+@app.post("/api/v1/loras/import", response_model=LoRAInfoResponse)
+async def import_lora(req: ImportLoRARequest):
+    """Import a .safetensors LoRA file into the LoRA directory."""
+    try:
+        info = lora_manager.import_lora(req.source_path)
+        return LoRAInfoResponse(**vars(info))
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"File not found: {req.source_path}")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 # --- Audio endpoints ---

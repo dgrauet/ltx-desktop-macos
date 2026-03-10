@@ -60,6 +60,7 @@ class TextToVideoPipeline:
         guidance_scale: float = 1.0,
         fps: int = 24,
         upscale: bool = False,
+        lora_args: list[str] | None = None,
         progress_callback: Callable[[int, int, float, str | None], None] | None = None,
     ) -> GenerationResult:
         """Run the full T2V generation pipeline.
@@ -123,6 +124,7 @@ class TextToVideoPipeline:
             output_path=str(output_path),
             tiling="auto",
             upscale=upscale,
+            lora_args=lora_args,
             preview_interval=2,
             progress_callback=_progress_adapter,
         )

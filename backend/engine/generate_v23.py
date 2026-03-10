@@ -122,6 +122,51 @@ def _decode_preview_frame(
         return None
 
 
+def _apply_loras(model, lora_specs: list[str]) -> None:
+    """Parse --lora arguments and apply LoRA weight deltas to the model.
+
+    Args:
+        model: The loaded LTX model (X0Model or LTXModel).
+        lora_specs: List of strings in format "/path/to/file.safetensors:strength".
+    """
+    from engine.lora_manager import load_lora_weights, apply_lora_to_model
+
+    for spec in lora_specs:
+        # Parse "path:strength" format
+        if ":" in spec:
+            # Find the last colon (strength separator) — path may contain colons on macOS
+            last_colon = spec.rfind(":")
+            lora_path = spec[:last_colon]
+            try:
+                strength = float(spec[last_colon + 1:])
+            except ValueError:
+                lora_path = spec
+                strength = 0.7
+        else:
+            lora_path = spec
+            strength = 0.7
+
+        log.info("Loading LoRA: %s (strength=%.2f)", lora_path, strength)
+        _progress(f"STATUS:Applying LoRA ({Path(lora_path).stem})")
+
+        try:
+            weight_deltas, metadata = load_lora_weights(lora_path, strength)
+            applied = apply_lora_to_model(model, weight_deltas)
+            log.info(
+                "LoRA applied: %s — %d/%d layers, rank=%d",
+                Path(lora_path).stem,
+                applied,
+                metadata["num_adapted_layers"],
+                metadata["rank"],
+            )
+            # Free the deltas after application
+            del weight_deltas
+            gc.collect()
+        except Exception as e:
+            log.error("Failed to apply LoRA %s: %s", lora_path, e)
+            _progress(f"STATUS:LoRA failed — {e}")
+
+
 def _load_precomputed_embeddings(path: str) -> dict:
     """Load precomputed text embeddings from npz file."""
     data = np.load(path)
@@ -255,6 +300,11 @@ def main() -> None:
         help="Skip bandwidth extension — output audio at 16kHz instead of 48kHz. "
              "Reduces metallic artifacts from synthesized harmonics.",
     )
+    parser.add_argument(
+        "--lora", action="append", default=[],
+        help="LoRA to apply. Format: /path/to/file.safetensors:strength "
+             "(can be specified multiple times for stacking LoRAs)",
+    )
     args = parser.parse_args()
 
     model_dir = Path(args.model_dir)
@@ -278,6 +328,11 @@ def main() -> None:
     model = load_ltx23_transformer(model_dir, low_memory=True, as_x0=True)
     log.info("Model loaded")
     _report_memory("after_model_load")
+
+    # Apply LoRAs if specified
+    if args.lora:
+        _apply_loras(model, args.lora)
+        _report_memory("after_lora_apply")
 
     # NOTE: TeaCache disabled — 0% cache hit rate with 8-step distilled model
     # (large sigma jumps between steps -> features change too much for caching)
@@ -494,6 +549,10 @@ def _run_two_stage(
 
     model = load_ltx23_transformer(model_dir, low_memory=True, as_x0=True)
     log.info("Transformer reloaded for Stage 2")
+
+    # Re-apply LoRAs after model reload
+    if args.lora:
+        _apply_loras(model, args.lora)
 
     num_stage2_steps = len(STAGE_2_SIGMAS) - 1
     _progress("STATUS:Stage 2 - refining at target resolution")

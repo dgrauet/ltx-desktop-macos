@@ -24,16 +24,16 @@ class BackendService: ObservableObject {
 
     // MARK: - Generation
 
-    func generateTextToVideo(request: T2VRequest) async throws -> JobResponse {
-        return try await post("/api/v1/generate/text-to-video", body: request)
+    func generateTextToVideo(request: T2VRequest, priority: String = "normal") async throws -> QueueSubmitResponse {
+        return try await post("/api/v1/generate/text-to-video?priority=\(priority)", body: request)
     }
 
-    func generatePreview(request: PreviewRequest) async throws -> JobResponse {
+    func generatePreview(request: PreviewRequest) async throws -> QueueSubmitResponse {
         return try await post("/api/v1/generate/preview", body: request)
     }
 
-    func generateImageToVideo(request: I2VRequest) async throws -> JobResponse {
-        return try await post("/api/v1/generate/image-to-video", body: request)
+    func generateImageToVideo(request: I2VRequest, priority: String = "normal") async throws -> QueueSubmitResponse {
+        return try await post("/api/v1/generate/image-to-video?priority=\(priority)", body: request)
     }
 
     func getJobStatus(jobId: String) async throws -> JobStatus {
@@ -42,6 +42,17 @@ class BackendService: ObservableObject {
 
     func cancelJob(jobId: String) async throws -> CancelResponse {
         return try await post("/api/v1/queue/\(jobId)/cancel", body: EmptyBody())
+    }
+
+    // MARK: - Queue Management
+
+    func getQueue() async throws -> [QueueEntry] {
+        return try await get("/api/v1/queue")
+    }
+
+    func changeJobPriority(jobId: String, priority: String) async throws -> SuccessResponse {
+        struct Body: Encodable { let priority: String }
+        return try await post("/api/v1/queue/\(jobId)/priority", body: Body(priority: priority))
     }
 
     // MARK: - Prompt Enhancement
