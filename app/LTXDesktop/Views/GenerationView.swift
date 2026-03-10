@@ -7,6 +7,7 @@ struct GenerationView: View {
     @StateObject private var vm = GenerationViewModel()
     @AppStorage("promptEnhanceEnabled") private var enhanceEnabled: Bool = true
     @State private var player: AVPlayer?
+    @State private var showQueuePopover = false
 
     var body: some View {
         HSplitView {
@@ -174,7 +175,7 @@ struct GenerationView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Toggle(isOn: $vm.upscale) {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Neural Upscale 2×")
+                            Text("Neural Upscale 2\u{00D7}")
                                 .font(.subheadline)
                             Text("Generates at half resolution then upscales with neural network. Better quality at high resolutions.")
                                 .font(.caption2)
@@ -210,52 +211,102 @@ struct GenerationView: View {
 
                 Divider()
 
-                // Generate + Preview buttons
-                HStack(spacing: 8) {
-                    Button(action: {
-                        Task { await vm.generate(using: backendService) }
-                    }) {
-                        HStack {
-                            if vm.isGenerating {
-                                ProgressView()
-                                    .scaleEffect(0.7)
+                // Generate + Preview + Add to Queue buttons
+                VStack(spacing: 8) {
+                    HStack(spacing: 8) {
+                        Button(action: {
+                            Task { await vm.generate(using: backendService) }
+                        }) {
+                            HStack {
+                                if vm.isGenerating && vm.queuePosition == nil {
+                                    ProgressView()
+                                        .scaleEffect(0.7)
+                                }
+                                Text(vm.isGenerating ? "Generating..." : "Generate")
+                                    .frame(maxWidth: .infinity)
                             }
-                            Text(vm.isGenerating ? "Generating..." : "Generate")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        .disabled(vm.prompt.isEmpty)
+                        .keyboardShortcut("g", modifiers: .command)
+
+                        Button(action: {
+                            Task { await vm.generatePreview(using: backendService) }
+                        }) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "eye")
+                                Text("Preview")
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.large)
+                        .disabled(vm.prompt.isEmpty)
+                        .keyboardShortcut("p", modifiers: .command)
+                    }
+
+                    // Add to Queue button — always enabled (that's the point of a queue)
+                    Button(action: {
+                        Task { await vm.addToQueue(using: backendService) }
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "plus.circle")
+                            Text("Add to Queue")
                                 .frame(maxWidth: .infinity)
                         }
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .disabled(vm.prompt.isEmpty || vm.isGenerating)
-                    .keyboardShortcut("g", modifiers: .command)
+                    .buttonStyle(.bordered)
+                    .controlSize(.regular)
+                    .disabled(vm.prompt.isEmpty)
+                    .keyboardShortcut("q", modifiers: [.command, .shift])
+                }
 
+                // Cancel button (when generating or queued)
+                if vm.isGenerating, let jobId = vm.currentJobId {
                     Button(action: {
-                        Task { await vm.generatePreview(using: backendService) }
+                        Task { await vm.cancelJob(jobId: jobId, using: backendService) }
                     }) {
                         HStack(spacing: 4) {
-                            Image(systemName: "eye")
-                            Text("Preview")
+                            Image(systemName: "xmark.circle")
+                            Text("Cancel")
+                                .frame(maxWidth: .infinity)
                         }
                     }
                     .buttonStyle(.bordered)
-                    .controlSize(.large)
-                    .disabled(vm.prompt.isEmpty || vm.isGenerating)
-                    .keyboardShortcut("p", modifiers: .command)
+                    .tint(.red)
+                    .controlSize(.regular)
+                    .keyboardShortcut(.escape, modifiers: [])
+                }
+
+                // Queue status indicator
+                if vm.queueLength > 0 || !vm.queueEntries.isEmpty {
+                    queueStatusBar
                 }
 
                 // Progress
                 if vm.isGenerating {
                     VStack(alignment: .leading, spacing: 4) {
-                        ProgressView(value: vm.progress)
-                        HStack(spacing: 0) {
-                            if let status = vm.statusMessage {
-                                Text("\(status) — ")
+                        if let pos = vm.queuePosition, pos > 0 {
+                            HStack(spacing: 4) {
+                                Image(systemName: "clock")
+                                    .font(.caption)
+                                    .foregroundStyle(.orange)
+                                Text("Position \(pos) in queue")
+                                    .font(.caption)
+                                    .foregroundStyle(.orange)
+                            }
+                        } else {
+                            ProgressView(value: vm.progress)
+                            HStack(spacing: 0) {
+                                if let status = vm.statusMessage {
+                                    Text("\(status) — ")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Text("\(Int(vm.progress * 100))%")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
-                            Text("\(Int(vm.progress * 100))%")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -270,6 +321,194 @@ struct GenerationView: View {
                 Spacer()
             }
             .padding()
+        }
+    }
+
+    // MARK: - Queue Status Bar
+
+    private var queueStatusBar: some View {
+        Button(action: { showQueuePopover.toggle() }) {
+            HStack(spacing: 6) {
+                Image(systemName: "list.number")
+                    .font(.caption)
+                let queuedCount = vm.queueEntries.filter { $0.state == "queued" }.count
+                let runningCount = vm.queueEntries.filter { $0.state == "running" }.count
+                if runningCount > 0 && queuedCount > 0 {
+                    Text("1 running, \(queuedCount) queued")
+                        .font(.caption)
+                } else if runningCount > 0 {
+                    Text("1 job running")
+                        .font(.caption)
+                } else if queuedCount > 0 {
+                    Text("\(queuedCount) job\(queuedCount == 1 ? "" : "s") queued")
+                        .font(.caption)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color(.controlBackgroundColor).opacity(0.5))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+        }
+        .buttonStyle(.plain)
+        .popover(isPresented: $showQueuePopover) {
+            queuePopoverContent
+        }
+    }
+
+    // MARK: - Queue Popover
+
+    private var queuePopoverContent: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header
+            HStack {
+                Text("Generation Queue")
+                    .font(.headline)
+                Spacer()
+                Button(action: {
+                    Task { await vm.refreshQueue(service: backendService) }
+                }) {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+
+            Divider()
+
+            if vm.queueEntries.isEmpty {
+                Text("Queue is empty")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding()
+                    .frame(maxWidth: .infinity)
+            } else {
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ForEach(vm.queueEntries) { entry in
+                            queueEntryRow(entry)
+                            Divider()
+                        }
+                    }
+                }
+                .frame(maxHeight: 300)
+            }
+        }
+        .frame(width: 340)
+        .onAppear {
+            Task { await vm.refreshQueue(service: backendService) }
+        }
+    }
+
+    private func queueEntryRow(_ entry: QueueEntry) -> some View {
+        HStack(spacing: 8) {
+            // State indicator
+            Circle()
+                .fill(stateColor(entry.state))
+                .frame(width: 8, height: 8)
+
+            VStack(alignment: .leading, spacing: 2) {
+                // Job type + prompt
+                HStack(spacing: 4) {
+                    Text(entry.jobType.uppercased())
+                        .font(.caption2)
+                        .fontWeight(.semibold)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Color.accentColor.opacity(0.15))
+                        .clipShape(RoundedRectangle(cornerRadius: 3))
+
+                    Text(entry.prompt)
+                        .font(.caption)
+                        .lineLimit(1)
+                        .foregroundStyle(.primary)
+                }
+
+                // Priority + ETA
+                HStack(spacing: 8) {
+                    Text(entry.priority)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+
+                    if entry.state == "running", let progress = entry.progress {
+                        Text("\(Int(progress * 100))%")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    } else if entry.state == "queued" {
+                        Text("Position \(entry.position)")
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                    }
+
+                    if let eta = entry.etaSeconds {
+                        Text("~\(formatETA(eta))")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            Spacer()
+
+            // Action buttons
+            if entry.state == "queued" {
+                // Priority buttons
+                Menu {
+                    Button("High Priority") {
+                        Task { await vm.changeJobPriority(jobId: entry.jobId, priority: "high", using: backendService) }
+                    }
+                    Button("Normal Priority") {
+                        Task { await vm.changeJobPriority(jobId: entry.jobId, priority: "normal", using: backendService) }
+                    }
+                    Button("Low Priority") {
+                        Task { await vm.changeJobPriority(jobId: entry.jobId, priority: "low", using: backendService) }
+                    }
+                } label: {
+                    Image(systemName: "arrow.up.arrow.down")
+                        .font(.caption)
+                }
+                .menuStyle(.borderlessButton)
+                .frame(width: 20)
+            }
+
+            // Cancel button
+            if entry.state == "queued" || entry.state == "running" {
+                Button(action: {
+                    Task { await vm.cancelJob(jobId: entry.jobId, using: backendService) }
+                }) {
+                    Image(systemName: "xmark.circle")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+                .buttonStyle(.borderless)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+    }
+
+    private func stateColor(_ state: String) -> Color {
+        switch state {
+        case "running": return .green
+        case "queued": return .orange
+        case "completed": return .blue
+        case "failed": return .red
+        case "cancelled": return .gray
+        default: return .secondary
+        }
+    }
+
+    private func formatETA(_ seconds: Double) -> String {
+        if seconds < 60 {
+            return "\(Int(seconds))s"
+        } else if seconds < 3600 {
+            return "\(Int(seconds / 60))m"
+        } else {
+            return "\(Int(seconds / 3600))h"
         }
     }
 

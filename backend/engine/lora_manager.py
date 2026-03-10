@@ -21,8 +21,6 @@ from typing import Any
 
 import mlx.core as mx
 
-from engine.memory_manager import aggressive_cleanup
-
 log = logging.getLogger(__name__)
 
 # Default LoRA directory

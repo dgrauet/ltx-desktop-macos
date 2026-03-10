@@ -402,4 +402,7 @@ class JobQueue:
                         job.job_id, job.state,
                     )
 
+                    # Wake ourselves up to process the next queued job
+                    self._process_event.set()
+
             # After processing all ready jobs, go back to waiting

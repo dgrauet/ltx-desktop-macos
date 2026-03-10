@@ -67,12 +67,12 @@ class BackendService: ObservableObject {
 
     // MARK: - Retake & Extend
 
-    func generateRetake(request: RetakeRequest) async throws -> JobResponse {
-        return try await post("/api/v1/generate/retake", body: request)
+    func generateRetake(request: RetakeRequest, priority: String = "normal") async throws -> QueueSubmitResponse {
+        return try await post("/api/v1/generate/retake?priority=\(priority)", body: request)
     }
 
-    func generateExtend(request: ExtendRequest) async throws -> JobResponse {
-        return try await post("/api/v1/generate/extend", body: request)
+    func generateExtend(request: ExtendRequest, priority: String = "normal") async throws -> QueueSubmitResponse {
+        return try await post("/api/v1/generate/extend?priority=\(priority)", body: request)
     }
 
     // MARK: - WebSocket Progress
@@ -153,14 +153,37 @@ class BackendService: ObservableObject {
     }
 
     @discardableResult
-    func loadLoRA(loraId: String) async throws -> SuccessResponse {
-        struct Body: Encodable { let lora_id: String }
-        return try await post("/api/v1/loras/load", body: Body(lora_id: loraId))
+    func loadLoRA(loraId: String, strength: Double = 0.7) async throws -> SuccessResponse {
+        struct Body: Encodable { let lora_id: String; let strength: Double }
+        return try await post("/api/v1/loras/load", body: Body(lora_id: loraId, strength: strength))
     }
 
     @discardableResult
     func unloadLoRA(loraId: String) async throws -> SuccessResponse {
         return try await post("/api/v1/loras/unload/\(loraId)", body: EmptyBody())
+    }
+
+    @discardableResult
+    func updateLoRAStrength(loraId: String, strength: Double) async throws -> SuccessResponse {
+        struct Body: Encodable { let strength: Double }
+        let url = URL(string: "\(baseURL)/api/v1/loras/\(loraId)/strength")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(Body(strength: strength))
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let body = String(data: data, encoding: .utf8) ?? "(no body)"
+            throw BackendError.requestFailed(code, body)
+        }
+        return try decoder.decode(SuccessResponse.self, from: data)
+    }
+
+    @discardableResult
+    func importLoRA(sourcePath: String) async throws -> LoRAInfo {
+        struct Body: Encodable { let source_path: String }
+        return try await post("/api/v1/loras/import", body: Body(source_path: sourcePath))
     }
 
     // MARK: - History
