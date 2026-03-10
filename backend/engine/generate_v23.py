@@ -47,6 +47,17 @@ def _progress(msg: str) -> None:
     print(msg, file=sys.stderr, flush=True)
 
 
+def _report_memory(label: str) -> None:
+    """Report current Metal memory stats via stderr for parent process parsing.
+
+    Format: MEMORY:<label>:active=<GB>:cache=<GB>:peak=<GB>
+    """
+    active = mx.get_active_memory() / (1024**3)
+    cache = mx.get_cache_memory() / (1024**3)
+    peak = mx.get_peak_memory() / (1024**3)
+    _progress(f"MEMORY:{label}:active={active:.3f}:cache={cache:.3f}:peak={peak:.3f}")
+
+
 def _load_precomputed_embeddings(path: str) -> dict:
     """Load precomputed text embeddings from npz file."""
     data = np.load(path)
@@ -167,6 +178,10 @@ def main() -> None:
         "--upscale", type=str, default=None,
         help="Path to upsampler weights for two-stage pipeline (neural latent upscale)",
     )
+    parser.add_argument(
+        "--ffmpeg-upscale", action="store_true",
+        help="Apply 2x lanczos upscale via ffmpeg as post-processing after video is saved",
+    )
     args = parser.parse_args()
 
     model_dir = Path(args.model_dir)
@@ -189,6 +204,7 @@ def main() -> None:
 
     model = load_ltx23_transformer(model_dir, low_memory=True, as_x0=True)
     log.info("Model loaded")
+    _report_memory("after_model_load")
 
     # NOTE: TeaCache disabled — 0% cache hit rate with 8-step distilled model
     # (large sigma jumps between steps -> features change too much for caching)
@@ -248,6 +264,7 @@ def _run_single_stage(
 
     _progress("STATUS:Generating video")
     output = generate(model, config, progress_callback=on_progress)
+    _report_memory("after_diffusion")
 
     # Free model before VAE decode
     del model
@@ -258,6 +275,12 @@ def _run_single_stage(
     _progress("STATUS:Decoding video")
     _decode_and_save(output, args, model_dir)
 
+    # Optional ffmpeg 2x lanczos upscale as post-processing
+    if args.ffmpeg_upscale:
+        _progress("STATUS:Upscaling 2x (ffmpeg)")
+        _ffmpeg_upscale_2x(args.output_path)
+
+    _report_memory("final")
     _progress("STATUS:Complete")
     log.info("Generation complete: %s", args.output_path)
 
@@ -318,6 +341,7 @@ def _run_two_stage(
         _progress(f"STAGE:1:STEP:{step}:{total}")
 
     output_s1 = generate(model, config_s1, progress_callback=on_progress_s1)
+    _report_memory("after_diffusion")
 
     video_latent = output_s1.video_latent
     audio_latent = output_s1.audio_latent
@@ -401,6 +425,12 @@ def _run_two_stage(
     _progress("STATUS:Decoding video")
     _decode_and_save(output_s2, args, model_dir)
 
+    # Optional ffmpeg 2x lanczos upscale as post-processing
+    if args.ffmpeg_upscale:
+        _progress("STATUS:Upscaling 2x (ffmpeg)")
+        _ffmpeg_upscale_2x(args.output_path)
+
+    _report_memory("final")
     _progress("STATUS:Complete")
     log.info("Two-stage generation complete: %s", args.output_path)
 
@@ -553,7 +583,11 @@ def _decode_audio(audio_latent: mx.array, model_dir: Path, output_path: str) -> 
 
     audio_decoder = load_audio_decoder(model_dir)
     mel_spec = audio_decoder(audio_latent)
-    log.info("Mel spectrogram shape: %s", mel_spec.shape)
+    mx.eval(mel_spec)
+    log.info(
+        "Mel spectrogram shape: %s, range: [%.3f, %.3f]",
+        mel_spec.shape, mel_spec.min().item(), mel_spec.max().item(),
+    )
 
     del audio_decoder
     gc.collect()
@@ -564,6 +598,7 @@ def _decode_audio(audio_latent: mx.array, model_dir: Path, output_path: str) -> 
 
     vocoder = load_vocoder(model_dir)
     waveform = vocoder(mel_spec)
+    mx.eval(waveform)
     log.info("Waveform shape: %s, sample_rate: %d", waveform.shape, vocoder.output_sample_rate)
 
     sample_rate = vocoder.output_sample_rate
@@ -572,8 +607,30 @@ def _decode_audio(audio_latent: mx.array, model_dir: Path, output_path: str) -> 
     gc.collect()
     mx.clear_cache()
 
-    # Save as WAV: (B, 2, T) -> (T, 2)
+    # Convert to numpy: (B, 2, T) -> (T, 2)
     audio_np = np.array(waveform[0].transpose(1, 0))
+    del waveform
+
+    # Log audio statistics for debugging
+    peak = np.max(np.abs(audio_np))
+    rms = np.sqrt(np.mean(audio_np ** 2))
+    log.info("Audio stats: peak=%.4f, rms=%.4f", peak, rms)
+
+    # Normalize audio to maximize dynamic range without clipping.
+    # The vocoder output is clipped to [-1, 1] but often produces low-amplitude
+    # signals. Normalizing to ~0.95 peak prevents wasting dynamic range in the
+    # 16-bit PCM output and avoids near-silent audio.
+    if peak > 1e-6:
+        target_peak = 0.95
+        gain = target_peak / peak
+        # Cap the gain to avoid amplifying noise when there's very little signal
+        gain = min(gain, 20.0)
+        audio_np = audio_np * gain
+        log.info("Audio normalized: gain=%.2f, new peak=%.4f", gain, np.max(np.abs(audio_np)))
+
+    # Clip to [-1, 1] for safe PCM encoding
+    audio_np = np.clip(audio_np, -1.0, 1.0)
+
     wav_path = output_path.replace(".mp4", "_audio.wav")
     sf.write(wav_path, audio_np, sample_rate)
     log.info("Audio saved to %s", wav_path)

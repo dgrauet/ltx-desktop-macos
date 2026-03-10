@@ -66,6 +66,38 @@ def get_memory_stats() -> dict:
     }
 
 
+def build_memory_stats_from_subprocess(subprocess_memory: dict[str, dict[str, float]]) -> dict:
+    """Build a memory stats dict from subprocess-reported memory data.
+
+    Uses the 'final' snapshot if available, otherwise the last reported snapshot.
+    Falls back to get_memory_stats() if no subprocess data is available.
+
+    Args:
+        subprocess_memory: Dict of label -> {active_memory_gb, cache_memory_gb, peak_memory_gb}
+            as reported by the generation subprocess.
+
+    Returns:
+        Dictionary in the same format as get_memory_stats().
+    """
+    if not subprocess_memory:
+        return get_memory_stats()
+
+    # Prefer 'final' snapshot, fall back to last reported
+    snapshot = subprocess_memory.get("final")
+    if snapshot is None:
+        # Use the last entry (dicts are ordered in Python 3.7+)
+        snapshot = list(subprocess_memory.values())[-1]
+
+    return {
+        "active_memory_gb": round(snapshot.get("active_memory_gb", 0.0), 3),
+        "cache_memory_gb": round(snapshot.get("cache_memory_gb", 0.0), 3),
+        "peak_memory_gb": round(snapshot.get("peak_memory_gb", 0.0), 3),
+        "system_available_gb": round(_get_system_available_memory_gb(), 3),
+        "generation_count_since_reload": _generation_count,
+        "next_reload_in": MAX_GENERATIONS_BEFORE_RELOAD - _generation_count,
+    }
+
+
 def reset_peak_memory() -> None:
     """Reset the peak memory counter for per-generation tracking."""
     if _MLX_AVAILABLE:

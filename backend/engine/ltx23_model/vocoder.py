@@ -214,7 +214,8 @@ class UpSample1d(nn.Module):
             t_r = time_axis * rolloff
             t_c = np.clip(t_r, -6, 6)
             window = np.cos(t_c * math.pi / 6 / 2) ** 2
-            sinc_vals = np.where(t_r == 0, 1.0, np.sin(np.pi * t_r) / (np.pi * t_r))
+            with np.errstate(divide="ignore", invalid="ignore"):
+                sinc_vals = np.where(t_r == 0, 1.0, np.sin(np.pi * t_r) / (np.pi * t_r))
             sinc_filter = (sinc_vals * window * rolloff / ratio).reshape(1, 1, -1)
         else:
             self.kernel_size = int(6 * ratio // 2) * 2 if kernel_size is None else kernel_size
@@ -538,13 +539,14 @@ def load_vocoder(model_dir: Path) -> VocoderWithBWE:
     if not weights_path.exists():
         raise FileNotFoundError(f"vocoder.safetensors not found in {model_dir}")
 
-    # Read config
+    # Read config — vocoder config is nested: cfg["vocoder"]["vocoder"] and cfg["vocoder"]["bwe"]
     config_path = model_dir / "embedded_config.json"
     if config_path.exists():
         with open(config_path) as f:
             cfg = json.load(f)
-        voc_cfg = cfg.get("vocoder", {})
-        bwe_cfg = cfg.get("bwe", {})
+        vocoder_section = cfg.get("vocoder", {})
+        voc_cfg = vocoder_section.get("vocoder", {})
+        bwe_cfg = vocoder_section.get("bwe", {})
     else:
         voc_cfg = {}
         bwe_cfg = {}

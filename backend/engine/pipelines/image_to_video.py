@@ -15,6 +15,7 @@ from typing import Awaitable, Callable
 
 from engine.memory_manager import (
     aggressive_cleanup,
+    build_memory_stats_from_subprocess,
     get_memory_stats,
     increment_generation_count,
     periodic_reload_check,
@@ -106,7 +107,7 @@ class ImageToVideoPipeline:
         )
         t0 = time.monotonic()
 
-        await run_mlx_generation(
+        gen_result = await run_mlx_generation(
             prompt=prompt,
             height=height,
             width=width,
@@ -130,10 +131,13 @@ class ImageToVideoPipeline:
         increment_generation_count()
         periodic_reload_check(self._model_manager)
 
+        subprocess_memory = gen_result.get("subprocess_memory", {})
+        memory_after = build_memory_stats_from_subprocess(subprocess_memory)
+
         return GenerationResult(
             job_id=job_id,
             output_path=str(output_path),
             duration_seconds=total_duration,
-            memory_after=get_memory_stats(),
+            memory_after=memory_after,
             stages=stages,
         )

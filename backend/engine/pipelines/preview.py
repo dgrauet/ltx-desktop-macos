@@ -16,6 +16,7 @@ from typing import Awaitable, Callable
 
 from engine.memory_manager import (
     aggressive_cleanup,
+    build_memory_stats_from_subprocess,
     get_memory_stats,
     reset_peak_memory,
 )
@@ -95,7 +96,7 @@ class PreviewPipeline:
         log.info("[%s] Starting %s preview generation: prompt=%r", job_id, mode, prompt[:80])
         t0 = time.monotonic()
 
-        await run_mlx_generation(
+        gen_result = await run_mlx_generation(
             prompt=prompt,
             height=PREVIEW_HEIGHT,
             width=PREVIEW_WIDTH,
@@ -116,10 +117,13 @@ class PreviewPipeline:
         total_duration = time.monotonic() - start_time
         log.info("[%s] Preview complete in %.2fs", job_id, total_duration)
 
+        subprocess_memory = gen_result.get("subprocess_memory", {})
+        memory_after = build_memory_stats_from_subprocess(subprocess_memory)
+
         return GenerationResult(
             job_id=job_id,
             output_path=str(output_path),
             duration_seconds=total_duration,
-            memory_after=get_memory_stats(),
+            memory_after=memory_after,
             stages=stages,
         )

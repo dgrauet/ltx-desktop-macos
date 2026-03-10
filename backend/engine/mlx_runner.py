@@ -30,6 +30,7 @@ _QUANTIZED_PATHS = [
 # Regex patterns for stderr progress lines
 _STAGE_RE = re.compile(r"^STAGE:(\d+):STEP:(\d+):(\d+)")
 _STATUS_RE = re.compile(r"^STATUS:(.+)")
+_MEMORY_RE = re.compile(r"^MEMORY:(\w+):active=([\d.]+):cache=([\d.]+):peak=([\d.]+)")
 
 # Progress mapping — maps (stage, step/total) to overall 0.0-1.0 range
 # When two-stage is active, Stage 1 gets 0.05-0.55, Stage 2 gets 0.65-0.80
@@ -279,7 +280,7 @@ async def run_mlx_generation(
     upscale: bool = False,
     progress_callback: Callable[..., Awaitable[None]] | None = None,
     venv_python: str | None = None,
-) -> str:
+) -> dict:
     """Run MLX video generation as an async subprocess.
 
     For quantized models on 32GB machines, text encoding runs in a separate
@@ -309,7 +310,8 @@ async def run_mlx_generation(
         venv_python: Path to venv Python binary. Auto-detected if None.
 
     Returns:
-        The ``output_path`` string on success.
+        Dictionary with ``output_path`` and ``subprocess_memory`` (memory stats
+        from the generation subprocess, or empty dict if unavailable).
 
     Raises:
         RuntimeError: If the subprocess exits with a non-zero code.
@@ -405,7 +407,8 @@ async def run_mlx_generation(
             is_two_stage = True
             log.info("Two-stage upscale enabled: %s", upscaler_path)
         else:
-            log.warning("Upscaler weights not found, falling back to single-stage")
+            cmd.append("--ffmpeg-upscale")
+            log.info("Neural upscaler weights not found, falling back to ffmpeg lanczos 2x")
     elif upscale:
         # LTX-2.0 fallback: ffmpeg lanczos (--upscale without path not supported)
         log.info("Upscale requested for v2.0 — not supported, skipping")
@@ -429,6 +432,8 @@ async def run_mlx_generation(
     )
 
     stderr_lines: list[str] = []
+    # Track memory stats reported by the subprocess
+    subprocess_memory: dict[str, dict[str, float]] = {}
 
     # Read stderr line by line for progress parsing
     assert proc.stderr is not None  # noqa: S101
@@ -451,6 +456,24 @@ async def run_mlx_generation(
                 await progress_callback(step, total, stage, pct, status="Generating video")
             continue
 
+        # Parse MEMORY lines (e.g. MEMORY:after_model_load:active=12.5:cache=2.1:peak=14.3)
+        memory_match = _MEMORY_RE.match(line)
+        if memory_match:
+            label = memory_match.group(1)
+            subprocess_memory[label] = {
+                "active_memory_gb": float(memory_match.group(2)),
+                "cache_memory_gb": float(memory_match.group(3)),
+                "peak_memory_gb": float(memory_match.group(4)),
+            }
+            log.info(
+                "Subprocess memory [%s]: active=%.3f GB, cache=%.3f GB, peak=%.3f GB",
+                label,
+                subprocess_memory[label]["active_memory_gb"],
+                subprocess_memory[label]["cache_memory_gb"],
+                subprocess_memory[label]["peak_memory_gb"],
+            )
+            continue
+
         # Parse STATUS lines
         status_match = _STATUS_RE.match(line)
         if status_match:
@@ -467,6 +490,8 @@ async def run_mlx_generation(
                 pct = 0.60
             elif "stage 2" in status_msg.lower():
                 pct = 0.63
+            elif "upscaling 2x (ffmpeg)" in status_msg.lower():
+                pct = 0.95
             elif "upscaling" in status_msg.lower():
                 pct = 0.83
             elif "decoding video" in status_msg.lower():
@@ -519,4 +544,7 @@ async def run_mlx_generation(
         await progress_callback(0, 0, 0, 1.0, status="Complete")
 
     log.info("MLX generation complete: %s", output_path)
-    return output_path
+    return {
+        "output_path": output_path,
+        "subprocess_memory": subprocess_memory,
+    }
