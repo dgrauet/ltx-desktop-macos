@@ -278,6 +278,7 @@ async def run_mlx_generation(
     image_strength: float = 1.0,
     tiling: str = "auto",
     upscale: bool = False,
+    ffmpeg_upscale: bool = False,
     progress_callback: Callable[..., Awaitable[None]] | None = None,
     venv_python: str | None = None,
 ) -> dict:
@@ -412,6 +413,10 @@ async def run_mlx_generation(
     elif upscale:
         # LTX-2.0 fallback: ffmpeg lanczos (--upscale without path not supported)
         log.info("Upscale requested for v2.0 — not supported, skipping")
+
+    if ffmpeg_upscale:
+        cmd.append("--ffmpeg-upscale")
+        log.info("ffmpeg lanczos 2x post-processing enabled")
 
     log.info("Starting MLX generation: %s", " ".join(cmd[:6]) + " ...")
     log.debug("Full command: %s", cmd)

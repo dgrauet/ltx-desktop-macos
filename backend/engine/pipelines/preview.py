@@ -107,7 +107,8 @@ class PreviewPipeline:
             image=image,
             image_strength=image_strength,
             tiling="aggressive",
-            upscale=False,  # Never upscale previews — low-res by design
+            upscale=False,
+            ffmpeg_upscale=True,  # lanczos 2x: 384×256 → 768×512, ~1s, no GPU cost
             progress_callback=_progress_adapter,
         )
 
