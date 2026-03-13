@@ -45,7 +45,8 @@ fi
 
 # 3. Download LTX-2.3 official model (~43GB)
 # NOTE: This downloads the raw PyTorch checkpoint. To convert to MLX split format
-# with quantization, use: cd backend && uv run python ../scripts/convert_ltx23.py --quantize --bits 8
+# with quantization, use: mlx-forge convert ltx-2.3 --quantize --bits 8
+# Install mlx-forge: pip install -e /path/to/mlx-forge (see https://github.com/dgrauet/mlx-forge)
 LTX_MODEL="Lightricks/LTX-2.3"
 LTX_CACHE_DIR="$HF_CACHE/models--Lightricks--LTX-2.3"
 LTX_MLX_DIR="$HF_CACHE/ltx23-mlx"
@@ -58,12 +59,12 @@ echo -e "  Size:  ~43GB (distilled checkpoint)"
 if [ -d "$LTX_MLX_DIR" ] && [ -f "$LTX_MLX_DIR/transformer.safetensors" ]; then
     echo -e "${GREEN}✓ Already converted to MLX format${NC}"
 elif [ -d "$LTX_CACHE_DIR" ] && [ -f "$LTX_CACHE_DIR/refs/main" ]; then
-    echo -e "${GREEN}✓ Already downloaded (run convert_ltx23.py to convert to MLX)${NC}"
+    echo -e "${GREEN}✓ Already downloaded (run 'mlx-forge convert ltx-2.3' to convert to MLX)${NC}"
 else
     echo -e "${YELLOW}  Downloading distilled checkpoint (this may take a while)...${NC}"
     $HF_CLI download "$LTX_MODEL" --include "ltx-2.3-22b-distilled.safetensors"
     echo -e "${GREEN}✓ LTX-2.3 checkpoint downloaded${NC}"
-    echo -e "${YELLOW}  Next step: cd backend && uv run python ../scripts/convert_ltx23.py --quantize --bits 8${NC}"
+    echo -e "${YELLOW}  Next step: mlx-forge convert ltx-2.3 --quantize --bits 8${NC}"
 fi
 
 # 4. Download Qwen3.5-2B-4bit (MLX quantized) for prompt enhancement (~1.2GB)

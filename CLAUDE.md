@@ -22,7 +22,7 @@ Native macOS app replicating **LTX Desktop** (Lightricks) with **100% local infe
 ### MLX on Apple Silicon
 - Unified CPU/GPU memory — no data copying
 - Key packages: `mlx`, `mlx-video-with-audio`, `mlx-lm`, `mlx-audio`
-- Weight conversion: PyTorch → MLX via `scripts/convert_ltx23.py`
+- Weight conversion: PyTorch → MLX via [mlx-forge](https://github.com/dgrauet/mlx-forge) (`mlx-forge convert ltx-2.3`)
 - Quantization: int4, int8 support
 
 ---

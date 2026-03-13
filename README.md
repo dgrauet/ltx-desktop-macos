@@ -46,12 +46,14 @@ bash scripts/setup.sh
 ### 3. Download and convert models
 
 ```bash
-# Download and convert LTX-2.3 to MLX split format with int8 quantization
-cd backend
-uv run python ../scripts/convert_ltx23.py --quantize --bits 8
+# Install mlx-forge (model conversion tool)
+pip install -e /path/to/mlx-forge  # or: pip install mlx-forge
+
+# Convert LTX-2.3 to MLX split format with int8 quantization
+mlx-forge convert ltx-2.3 --quantize --bits 8
 
 # Download prompt enhancer
-uv run python -c "from huggingface_hub import snapshot_download; snapshot_download('mlx-community/Qwen3.5-2B-4bit')"
+huggingface-cli download mlx-community/Qwen3.5-2B-4bit
 ```
 
 Downloads and converts to `~/.cache/huggingface/`:
@@ -305,10 +307,9 @@ ltx-desktop-macos/
 │   └── test_marathon.py          # 10-gen stability test (release gate)
 ├── scripts/
 │   ├── setup.sh                  # Full installation
-│   ├── convert_ltx23.py          # PyTorch → MLX split + quantization
-│   ├── validate_ltx23.py         # Validate converted model integrity
-│   ├── download_models.sh        # HuggingFace model download (legacy)
-│   └── dev.sh                    # Dev launch (backend + Xcode hint)
+│   ├── download_models.sh        # HuggingFace model download
+│   ├── dev.sh                    # Dev launch (backend + Xcode hint)
+│   └── marathon_test.py          # 10-gen stability test
 └── models/                       # Gitignored — ~42 GB+
 ```
 
