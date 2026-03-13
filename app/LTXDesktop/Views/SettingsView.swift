@@ -12,77 +12,39 @@ struct SettingsView: View {
     @AppStorage("outputDirectory") private var outputDirectory: String = ""
 
     var body: some View {
-        TabView {
-            generalTab
-                .tabItem {
-                    Label("General", systemImage: "slider.horizontal.3")
-                }
-
-            modelsTab
-                .tabItem {
-                    Label("Models", systemImage: "cube.box")
-                }
-
-            memoryTab
-                .tabItem {
-                    Label("Memory", systemImage: "memorychip")
-                }
-
-            loraTab
-                .tabItem {
-                    Label("LoRA", systemImage: "puzzlepiece.extension")
-                }
-        }
-        .padding()
-        .onAppear {
-            memoryVM.startPolling(service: backendService, isGenerating: false)
-            modelsVM.loadModels(service: backendService)
-        }
-        .onDisappear {
-            memoryVM.stopPolling()
-            modelsVM.stopAllPolling()
-        }
-    }
-
-    // MARK: - General Tab
-
-    private var generalTab: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                Text("General")
+            VStack(alignment: .leading, spacing: 32) {
+                // Title
+                Text("Settings")
                     .font(.title2)
                     .fontWeight(.semibold)
 
-                // Prompt Enhancement section
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Prompt Enhancement")
-                        .font(.headline)
+                // MARK: - General
+                settingsSection(title: "General", icon: "slider.horizontal.3") {
+                    // Prompt Enhancement
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Prompt Enhancement")
+                            .font(.headline)
 
-                    Toggle(isOn: $enhanceEnabled) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Enable prompt enhancement (Qwen3.5-2B)")
-                                .font(.body)
-                            Text("Automatically expands short prompts into detailed LTX-2.3 optimized descriptions. Requires ~1.2GB RAM and temporarily unloads the video model.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
+                        Toggle(isOn: $enhanceEnabled) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Enable prompt enhancement (Qwen3.5-2B)")
+                                    .font(.body)
+                                Text("Automatically expands short prompts into detailed LTX-2.3 optimized descriptions. Requires ~1.2GB RAM and temporarily unloads the video model.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
                         }
+                        .toggleStyle(.switch)
                     }
-                    .toggleStyle(.switch)
-                }
-                .padding(14)
-                .background(Color(.controlBackgroundColor).opacity(0.5))
-                .clipShape(RoundedRectangle(cornerRadius: 10))
 
-                // Output directory section
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Output")
-                        .font(.headline)
+                    Divider()
 
+                    // Output directory
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Output Directory")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                            .font(.headline)
 
                         HStack(spacing: 8) {
                             TextField(
@@ -104,129 +66,182 @@ struct SettingsView: View {
                         }
                     }
                 }
-                .padding(14)
-                .background(Color(.controlBackgroundColor).opacity(0.5))
-                .clipShape(RoundedRectangle(cornerRadius: 10))
 
-                Spacer()
-            }
-            .padding()
-        }
-    }
-
-    private func chooseOutputDirectory() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.canCreateDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.prompt = "Choose Output Directory"
-        panel.message = "Select where generated videos will be saved."
-
-        if panel.runModal() == .OK, let url = panel.url {
-            outputDirectory = url.path
-        }
-    }
-
-    // MARK: - Models Tab
-
-    private var modelsTab: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                // Header with refresh button
-                HStack {
-                    Text("Models")
-                        .font(.title2)
-                        .fontWeight(.semibold)
-
-                    Spacer()
-
-                    Button {
-                        modelsVM.loadModels(service: backendService)
-                    } label: {
-                        Label("Refresh", systemImage: "arrow.clockwise")
+                // MARK: - Models
+                settingsSection(title: "Models", icon: "cube.box") {
+                    // Error banner
+                    if let error = modelsVM.errorMessage {
+                        HStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.red)
+                            Text(error)
+                                .font(.caption)
+                            Spacer()
+                            Button("Dismiss") {
+                                modelsVM.errorMessage = nil
+                            }
                             .font(.caption)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .disabled(modelsVM.isLoading)
-                }
-
-                // Error banner
-                if let error = modelsVM.errorMessage {
-                    HStack(spacing: 8) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.red)
-                        Text(error)
-                            .font(.caption)
-                        Spacer()
-                        Button("Dismiss") {
-                            modelsVM.errorMessage = nil
+                            .buttonStyle(.borderless)
                         }
-                        .font(.caption)
-                        .buttonStyle(.borderless)
+                        .padding(10)
+                        .background(Color.red.opacity(0.1))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
                     }
-                    .padding(10)
-                    .background(Color.red.opacity(0.1))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                }
 
-                if modelsVM.isLoading && modelsVM.models.isEmpty {
-                    VStack(spacing: 12) {
-                        ProgressView()
-                        Text("Loading model information...")
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, minHeight: 100)
-                } else {
-                    // Model list
-                    VStack(alignment: .leading, spacing: 0) {
-                        ForEach(Array(modelsVM.models.enumerated()), id: \.element.id) { index, model in
-                            modelRow(model)
+                    if modelsVM.isLoading && modelsVM.models.isEmpty {
+                        VStack(spacing: 12) {
+                            ProgressView()
+                            Text("Loading model information...")
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 80)
+                    } else {
+                        // Model list
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(Array(modelsVM.models.enumerated()), id: \.element.id) { index, model in
+                                modelRow(model)
 
-                            if index < modelsVM.models.count - 1 {
-                                Divider()
-                                    .padding(.leading, 16)
+                                if index < modelsVM.models.count - 1 {
+                                    Divider()
+                                        .padding(.leading, 16)
+                                }
                             }
                         }
-                    }
-                    .background(Color(.controlBackgroundColor).opacity(0.5))
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .background(Color(.controlBackgroundColor).opacity(0.3))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
 
-                    // Disk usage summary
-                    HStack(spacing: 16) {
-                        HStack(spacing: 6) {
-                            Image(systemName: "internaldrive")
-                                .foregroundStyle(.secondary)
+                        // Disk usage summary
+                        HStack(spacing: 16) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "internaldrive")
+                                    .foregroundStyle(.secondary)
+                                    .font(.caption)
+                                Text("Total disk usage: \(String(format: "%.1f GB", modelsVM.totalDiskGb))")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            Spacer()
+
+                            let downloadedCount = modelsVM.models.filter(\.downloaded).count
+                            Text("\(downloadedCount) of \(modelsVM.models.count) models downloaded")
                                 .font(.caption)
-                            Text("Total disk usage: \(String(format: "%.1f GB", modelsVM.totalDiskGb))")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    HStack(spacing: 6) {
+                        Image(systemName: "info.circle")
+                            .foregroundStyle(.secondary)
+                            .font(.caption)
+                        Text("Models are stored in ~/.cache/huggingface/. Deleting a model frees disk space but requires re-download before next use.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                // MARK: - Memory
+                settingsSection(title: "Metal Memory", icon: "memorychip") {
+                    if let stats = memoryVM.memoryStats {
+                        LazyVGrid(columns: [
+                            GridItem(.flexible()),
+                            GridItem(.flexible()),
+                        ], spacing: 12) {
+                            memoryCard(
+                                title: "Active Memory",
+                                value: stats.activeMemoryGb,
+                                color: .blue
+                            )
+                            memoryCard(
+                                title: "Cache Memory",
+                                value: stats.cacheMemoryGb,
+                                color: memoryVM.highCacheWarning ? .yellow : .green
+                            )
+                            memoryCard(
+                                title: "Peak Memory",
+                                value: stats.peakMemoryGb,
+                                color: memoryVM.criticalPeakWarning ? .red : .orange
+                            )
+                            memoryCard(
+                                title: "System Available",
+                                value: stats.systemAvailableGb,
+                                color: memoryVM.lowAvailableWarning ? .red : .mint
+                            )
+                        }
+
+                        // Reload counter
+                        HStack {
+                            Text("Generations since reload:")
+                                .foregroundStyle(.secondary)
+                            Text("\(stats.generationCountSinceReload) / 5")
+                                .fontWeight(.medium)
+                                .monospacedDigit()
+                            Spacer()
+                            Text("Next reload in \(stats.nextReloadIn) generations")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
 
-                        Spacer()
+                        // Warnings
+                        if memoryVM.highCacheWarning {
+                            warningBanner(
+                                message: "High cache — cleanup recommended",
+                                color: .yellow
+                            )
+                        }
+                        if memoryVM.criticalPeakWarning {
+                            warningBanner(
+                                message: "Memory critical — peak exceeds 85% of RAM",
+                                color: .red
+                            )
+                        }
+                        if memoryVM.lowAvailableWarning {
+                            warningBanner(
+                                message: "Low memory — reduce resolution or frame count",
+                                color: .red
+                            )
+                        }
+                    } else {
+                        VStack(spacing: 12) {
+                            ProgressView()
+                            Text("Loading memory stats...")
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 80)
+                    }
+                }
 
-                        let downloadedCount = modelsVM.models.filter(\.downloaded).count
-                        Text("\(downloadedCount) of \(modelsVM.models.count) models downloaded")
+                // MARK: - LoRA Info
+                settingsSection(title: "LoRA", icon: "puzzlepiece.extension") {
+                    HStack(spacing: 8) {
+                        Image(systemName: "puzzlepiece.extension")
+                            .foregroundStyle(.secondary)
+                        Text("Manage LoRAs in the LoRA tab in the sidebar.")
+                            .font(.body)
+                        Spacer()
+                    }
+
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .foregroundStyle(.orange)
+                            .font(.caption)
+                        Text("LoRAs must be compatible with the LTX-2.3 latent space. LTX-2.0 LoRAs are not compatible.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    .padding(.top, 4)
                 }
-
-                HStack(spacing: 6) {
-                    Image(systemName: "info.circle")
-                        .foregroundStyle(.secondary)
-                        .font(.caption)
-                    Text("Models are stored in ~/.cache/huggingface/. Deleting a model frees disk space but requires re-download before next use.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Spacer()
             }
-            .padding()
+            .padding(20)
+        }
+        .onAppear {
+            memoryVM.startPolling(service: backendService, isGenerating: false)
+            modelsVM.loadModels(service: backendService)
+        }
+        .onDisappear {
+            memoryVM.stopPolling()
+            modelsVM.stopAllPolling()
         }
         .alert(
             "Delete Model",
@@ -245,6 +260,41 @@ struct SettingsView: View {
             }
         } message: { model in
             Text("Are you sure you want to delete \"\(model.name)\"? This will free approximately \(model.sizeLabel) of disk space. You will need to re-download the model before generating videos.")
+        }
+    }
+
+    // MARK: - Section Builder
+
+    private func settingsSection<Content: View>(
+        title: String,
+        icon: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label(title, systemImage: icon)
+                .font(.headline)
+
+            content()
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.controlBackgroundColor).opacity(0.5))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    // MARK: - Components
+
+    private func chooseOutputDirectory() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Choose Output Directory"
+        panel.message = "Select where generated videos will be saved."
+
+        if panel.runModal() == .OK, let url = panel.url {
+            outputDirectory = url.path
         }
     }
 
@@ -292,7 +342,6 @@ struct SettingsView: View {
 
                 // Action buttons
                 if modelsVM.isDownloading(model.id) {
-                    // Downloading state
                     VStack(spacing: 2) {
                         ProgressView(value: modelsVM.downloadProgress(model.id))
                             .frame(width: 80)
@@ -333,133 +382,6 @@ struct SettingsView: View {
         .padding(.vertical, 12)
     }
 
-    // MARK: - Memory Tab
-
-    private var memoryTab: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Text("Metal Memory Monitor")
-                .font(.title2)
-                .fontWeight(.semibold)
-
-            if let stats = memoryVM.memoryStats {
-                LazyVGrid(columns: [
-                    GridItem(.flexible()),
-                    GridItem(.flexible()),
-                ], spacing: 16) {
-                    memoryCard(
-                        title: "Active Memory",
-                        value: stats.activeMemoryGb,
-                        color: .blue
-                    )
-                    memoryCard(
-                        title: "Cache Memory",
-                        value: stats.cacheMemoryGb,
-                        color: memoryVM.highCacheWarning ? .yellow : .green
-                    )
-                    memoryCard(
-                        title: "Peak Memory",
-                        value: stats.peakMemoryGb,
-                        color: memoryVM.criticalPeakWarning ? .red : .orange
-                    )
-                    memoryCard(
-                        title: "System Available",
-                        value: stats.systemAvailableGb,
-                        color: memoryVM.lowAvailableWarning ? .red : .mint
-                    )
-                }
-
-                Divider()
-
-                // Reload counter
-                HStack {
-                    Text("Generations since reload:")
-                        .foregroundStyle(.secondary)
-                    Text("\(stats.generationCountSinceReload) / 5")
-                        .fontWeight(.medium)
-                        .monospacedDigit()
-                    Spacer()
-                    Text("Next reload in \(stats.nextReloadIn) generations")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                // Warnings
-                if memoryVM.highCacheWarning {
-                    warningBanner(
-                        message: "High cache — cleanup recommended",
-                        color: .yellow
-                    )
-                }
-                if memoryVM.criticalPeakWarning {
-                    warningBanner(
-                        message: "Memory critical — peak exceeds 85% of RAM",
-                        color: .red
-                    )
-                }
-                if memoryVM.lowAvailableWarning {
-                    warningBanner(
-                        message: "Low memory — reduce resolution or frame count",
-                        color: .red
-                    )
-                }
-            } else {
-                VStack(spacing: 12) {
-                    ProgressView()
-                    Text("Loading memory stats...")
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-
-            Spacer()
-        }
-        .padding()
-    }
-
-    // MARK: - LoRA Tab
-
-    private var loraTab: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                Text("LoRA Models")
-                    .font(.title2)
-                    .fontWeight(.semibold)
-
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "puzzlepiece.extension")
-                            .foregroundStyle(.secondary)
-                        Text("Manage LoRAs in the LoRA tab")
-                            .font(.body)
-                        Spacer()
-                    }
-                    Text("LoRAs extend the model with specialized capabilities: camera control, detail enhancement, and custom styles. Select the LoRA tab in the sidebar to browse, load, and toggle available LoRAs.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    HStack(spacing: 6) {
-                        Image(systemName: "exclamationmark.triangle")
-                            .foregroundStyle(.orange)
-                            .font(.caption)
-                        Text("LoRAs must be compatible with the LTX-2.3 latent space. LTX-2.0 LoRAs are not compatible.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.top, 4)
-                }
-                .padding(14)
-                .background(Color(.controlBackgroundColor).opacity(0.5))
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-
-                Spacer()
-            }
-            .padding()
-        }
-    }
-
-    // MARK: - Components
-
     private func memoryCard(title: String, value: Double, color: Color) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title)
@@ -475,7 +397,7 @@ struct SettingsView: View {
             .tint(color)
         }
         .padding(12)
-        .background(Color(.controlBackgroundColor).opacity(0.5))
+        .background(Color(.controlBackgroundColor).opacity(0.3))
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 

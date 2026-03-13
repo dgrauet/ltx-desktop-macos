@@ -7,6 +7,34 @@ struct LoRAView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            // Header with inline action buttons
+            HStack {
+                Text("LoRA Models")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+
+                Spacer()
+
+                Button {
+                    Task { await vm.loadLoRAs(using: backendService) }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
+                .help("Refresh")
+
+                Button {
+                    vm.isImporting = true
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .buttonStyle(.borderless)
+                .help("Import LoRA (.safetensors)")
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .padding(.bottom, 8)
+
             // Error banner
             if let errorMessage = vm.errorMessage {
                 HStack(spacing: 8) {
@@ -58,25 +86,6 @@ struct LoRAView: View {
                 loraList
             }
         }
-        .navigationTitle("LoRA Models")
-        .toolbar {
-            ToolbarItem {
-                Button {
-                    vm.isImporting = true
-                } label: {
-                    Image(systemName: "plus")
-                }
-                .help("Import LoRA (.safetensors)")
-            }
-            ToolbarItem {
-                Button {
-                    Task { await vm.loadLoRAs(using: backendService) }
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                }
-                .help("Refresh")
-            }
-        }
         .fileImporter(
             isPresented: $vm.isImporting,
             allowedContentTypes: [UTType(filenameExtension: "safetensors") ?? .data],
@@ -99,10 +108,16 @@ struct LoRAView: View {
     // MARK: - LoRA List
 
     private var loraList: some View {
-        List(vm.loras) { lora in
-            loraRow(lora)
+        ScrollView {
+            VStack(spacing: 0) {
+                ForEach(vm.loras) { lora in
+                    loraRow(lora)
+                    Divider()
+                        .padding(.leading, 16)
+                }
+            }
+            .padding(.vertical, 8)
         }
-        .listStyle(.inset)
     }
 
     private func loraRow(_ lora: LoRAInfo) -> some View {
@@ -186,7 +201,8 @@ struct LoRAView: View {
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .padding(.vertical, 4)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
         .animation(.easeInOut(duration: 0.2), value: lora.loaded)
     }
 

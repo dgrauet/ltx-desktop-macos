@@ -14,28 +14,65 @@ struct ContentView: View {
     @State private var selectedTab: Tab = .generation
 
     var body: some View {
-        NavigationSplitView {
-            List(Tab.allCases, id: \.self, selection: $selectedTab) { tab in
-                Label(tab.rawValue, systemImage: iconForTab(tab))
+        HStack(spacing: 0) {
+            // Sidebar
+            VStack(spacing: 0) {
+                Text("LTX Desktop")
+                    .font(.headline)
+                    .padding(.vertical, 12)
+                    .frame(maxWidth: .infinity)
+
+                Divider()
+
+                ForEach(Tab.allCases, id: \.self) { tab in
+                    sidebarButton(tab)
+                }
+
+                Spacer()
             }
-            .listStyle(.sidebar)
-            .navigationTitle("LTX Desktop")
-        } detail: {
-            if !processManager.isBackendReady {
-                preparingView
-            } else {
-                switch selectedTab {
-                case .generation:
-                    GenerationView()
-                case .history:
-                    HistoryView()
-                case .lora:
-                    LoRAView()
-                case .settings:
-                    SettingsView()
+            .frame(width: 180)
+            .background(.ultraThinMaterial)
+
+            Divider()
+
+            // Detail
+            Group {
+                if !processManager.isBackendReady {
+                    preparingView
+                } else {
+                    switch selectedTab {
+                    case .generation:
+                        GenerationView()
+                    case .history:
+                        HistoryView()
+                    case .lora:
+                        LoRAView()
+                    case .settings:
+                        SettingsView()
+                    }
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+
+    private func sidebarButton(_ tab: Tab) -> some View {
+        Button {
+            selectedTab = tab
+        } label: {
+            Label(tab.rawValue, systemImage: iconForTab(tab))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(
+            selectedTab == tab
+                ? Color.accentColor.opacity(0.15)
+                : Color.clear
+        )
+        .foregroundStyle(selectedTab == tab ? .primary : .secondary)
     }
 
     private var preparingView: some View {

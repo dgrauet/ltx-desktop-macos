@@ -10,11 +10,13 @@ struct LTXDesktopApp: App {
             ContentView()
                 .environmentObject(processManager)
                 .environmentObject(backendService)
+                .frame(minWidth: 800, minHeight: 500)
                 .onAppear {
                     processManager.startBackend()
                 }
                 .preferredColorScheme(.dark)
         }
         .defaultSize(width: 1200, height: 800)
+        .windowResizability(.contentSize)
     }
 }

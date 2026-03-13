@@ -11,22 +11,32 @@ struct HistoryView: View {
     ]
 
     var body: some View {
-        HSplitView {
-            gridPanel
-                .frame(minWidth: 400)
-
-            detailPanel
-                .frame(minWidth: 320, maxWidth: .infinity)
-        }
-        .onAppear { vm.loadVideos() }
-        .toolbar {
-            ToolbarItem {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Text("History")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+                Spacer()
                 Button(action: { vm.loadVideos() }) {
                     Image(systemName: "arrow.clockwise")
                 }
+                .buttonStyle(.borderless)
                 .help("Refresh")
             }
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .padding(.bottom, 8)
+
+            HSplitView {
+                gridPanel
+                    .frame(minWidth: 400)
+
+                detailPanel
+                    .frame(minWidth: 320, maxWidth: .infinity)
+            }
         }
+        .onAppear { vm.loadVideos() }
         .confirmationDialog(
             "Delete Video",
             isPresented: $showDeleteConfirmation,
@@ -150,16 +160,17 @@ struct VideoCard: View {
                 if let img = thumbnail {
                     Image(nsImage: img)
                         .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: 180, height: 110)
+                        .aspectRatio(16/9, contentMode: .fill)
                         .clipped()
                 } else {
                     Rectangle()
                         .fill(Color(.controlBackgroundColor))
-                        .frame(width: 180, height: 110)
-                    Image(systemName: "film")
-                        .font(.system(size: 28))
-                        .foregroundStyle(.secondary)
+                        .aspectRatio(16/9, contentMode: .fit)
+                        .overlay {
+                            Image(systemName: "film")
+                                .font(.system(size: 28))
+                                .foregroundStyle(.secondary)
+                        }
                 }
 
                 // Play overlay on hover
@@ -259,16 +270,18 @@ struct VideoDetailView: View {
             // Player
             if let player = player {
                 VideoPlayer(player: player)
-                    .frame(height: 260)
+                    .aspectRatio(16/9, contentMode: .fit)
+                    .frame(minHeight: 180, maxHeight: .infinity)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                     .padding([.top, .horizontal], 16)
             } else {
                 ZStack {
                     RoundedRectangle(cornerRadius: 10)
                         .fill(Color(.windowBackgroundColor).opacity(0.5))
-                        .frame(height: 260)
                     ProgressView()
                 }
+                .aspectRatio(16/9, contentMode: .fit)
+                .frame(minHeight: 180, maxHeight: .infinity)
                 .padding([.top, .horizontal], 16)
             }
 
