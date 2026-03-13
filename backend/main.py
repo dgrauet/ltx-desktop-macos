@@ -68,7 +68,7 @@ job_queue = JobQueue()
 async def lifespan(app: FastAPI):
     """Startup: load model stub, warm up, seed history, start queue. Shutdown: unload."""
     log.info("Starting LTX Desktop backend...")
-    model_manager.load_model("notapalindrome/ltx2-mlx-av")
+    model_manager.load_model("dgrauet/ltx-2.3-mlx-distilled-q8")
     aggressive_cleanup()
     # Populate history with existing video files not yet tracked
     seeded = history_store.seed_from_existing_files()

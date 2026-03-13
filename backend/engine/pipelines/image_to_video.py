@@ -118,7 +118,6 @@ class ImageToVideoPipeline:
             output_path=str(output_path),
             image=source_image_path,
             image_strength=image_strength,
-            tiling="auto",
             upscale=upscale,
             lora_args=lora_args,
             preview_interval=2,

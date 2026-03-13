@@ -1,6 +1,6 @@
-"""Async subprocess wrapper for MLX video generation.
+"""Async subprocess wrapper for LTX-2.3 MLX video generation.
 
-Runs real MLX inference via ``python -m mlx_video.generate_av`` in a
+Runs LTX-2.3 inference via ``python -m engine.generate_v23`` in a
 subprocess, parsing stderr progress lines in real time and forwarding
 them to an optional async callback.
 """
@@ -18,15 +18,11 @@ from engine.memory_manager import aggressive_cleanup
 
 log = logging.getLogger(__name__)
 
-# Default model repo — overridden if a local quantized model is detected
-DEFAULT_MODEL_REPO = "notapalindrome/ltx2-mlx-av"
+# Default model repo on HuggingFace (int8 quantized, MLX split format)
+DEFAULT_MODEL_REPO = "dgrauet/ltx-2.3-mlx-distilled-q8"
 
-# Quantized model paths (checked in priority order — v2.3 preferred, then v2.0 int8/int4)
-_QUANTIZED_PATHS = [
-    Path.home() / ".cache/huggingface/hub/ltx23-mlx",
-    Path.home() / ".cache/huggingface/hub/ltx2-mlx-av-int8",
-    Path.home() / ".cache/huggingface/hub/ltx2-mlx-av-int4",
-]
+# Legacy local path (from earlier local_dir downloads — checked as fallback)
+_LEGACY_LOCAL_PATH = Path.home() / ".cache/huggingface/hub/ltx23-mlx"
 
 # Regex patterns for stderr progress lines
 _STAGE_RE = re.compile(r"^STAGE:(\d+):STEP:(\d+):(\d+)")
@@ -54,49 +50,59 @@ def _is_quantized_model(model_path: Path) -> bool:
     return qconfig.exists()
 
 
-def _get_model_version(model_path: Path) -> str:
-    """Detect model version from config.json.
+def get_model_repo() -> tuple[str, bool]:
+    """Return the model path and whether it's quantized.
+
+    Resolves the default HuggingFace repo from local cache, with fallback
+    to a legacy local path for backwards compatibility.
 
     Returns:
-        "2.3" for LTX-2.3, "2.0" for LTX-2.0.
+        Tuple of (model_path, is_quantized).
     """
-    config_file = model_path / "config.json"
-    if config_file.exists():
-        import json
-        with open(config_file) as f:
-            config = json.load(f)
-        version = config.get("model_version", "")
-        if version.startswith("2.3") or config.get("is_v2", False):
-            return "2.3"
-    return "2.0"
+    # Try HF standard cache first
+    model_path = _resolve_hf_model(DEFAULT_MODEL_REPO)
+    if model_path:
+        quantized = _is_quantized_model(Path(model_path))
+        log.info("Using HF model: %s (%s)", DEFAULT_MODEL_REPO, model_path)
+        return model_path, quantized
+
+    # Fallback: legacy local path (from earlier local_dir downloads)
+    if _LEGACY_LOCAL_PATH.exists() and (_LEGACY_LOCAL_PATH / "transformer.safetensors").exists():
+        quantized = _is_quantized_model(_LEGACY_LOCAL_PATH)
+        log.info("Using legacy local model: %s", _LEGACY_LOCAL_PATH)
+        return str(_LEGACY_LOCAL_PATH), quantized
+
+    # Last resort: return repo ID (generation will fail if not downloadable)
+    log.warning("Could not resolve model %s — returning repo ID", DEFAULT_MODEL_REPO)
+    return DEFAULT_MODEL_REPO, True
 
 
-def get_model_repo() -> tuple[str, bool, str]:
-    """Return the best available model, whether it's quantized, and its version.
+def _resolve_hf_model(repo_id: str) -> str | None:
+    """Resolve a HuggingFace repo to a local cached path.
 
-    Checks for local models in priority order: LTX-2.3, then LTX-2.0 int8/int4.
-    If no local model found, returns the default HF repo ID.
+    Uses huggingface_hub to check if the model is already cached,
+    without triggering a download. Returns the snapshot path if cached.
+
+    Args:
+        repo_id: HuggingFace repository ID.
 
     Returns:
-        Tuple of (model_repo_or_path, is_quantized, version).
-        version is "2.3" or "2.0".
+        Local path to the cached model, or None if not cached.
     """
-    for qpath in _QUANTIZED_PATHS:
-        config_file = qpath / "config.json"
-        # Check for either monolithic or split model files
-        has_model = (qpath / "model.safetensors").exists() or (qpath / "transformer.safetensors").exists()
-        if has_model and config_file.exists():
-            quantized = _is_quantized_model(qpath)
-            version = _get_model_version(qpath)
-            log.info(
-                "Using %s model v%s: %s",
-                "quantized" if quantized else "local",
-                version,
-                qpath,
-            )
-            return str(qpath), quantized, version
-    log.info("Using default model: %s", DEFAULT_MODEL_REPO)
-    return DEFAULT_MODEL_REPO, False, "2.0"
+    try:
+        from huggingface_hub import try_to_load_from_cache
+
+        # Check that both config and main model weights are cached
+        config_cached = try_to_load_from_cache(repo_id, "config.json")
+        weights_cached = try_to_load_from_cache(repo_id, "transformer.safetensors")
+        if (
+            config_cached and isinstance(config_cached, str)
+            and weights_cached and isinstance(weights_cached, str)
+        ):
+            return str(Path(config_cached).parent)
+    except Exception as e:
+        log.debug("Could not check HF cache for %s: %s", repo_id, e)
+    return None
 
 
 def get_venv_python() -> str:
@@ -153,20 +159,13 @@ def _get_upscaler_weights() -> str | None:
     """
     cache_root = Path.home() / ".cache" / "huggingface" / "hub"
 
-    # Check LTX-2.3 repo first
-    for repo_name in ["models--Lightricks--LTX-2.3", "models--Lightricks--LTX-2"]:
-        repo_dir = cache_root / repo_name / "snapshots"
-        if not repo_dir.exists():
-            continue
+    repo_dir = cache_root / "models--Lightricks--LTX-2.3" / "snapshots"
+    if repo_dir.exists():
         for snapshot in sorted(repo_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
-            for fname in [
-                "ltx-2.3-spatial-upscaler-x2-1.0.safetensors",
-                "ltx-2-spatial-upscaler-x2-1.0.safetensors",
-            ]:
-                candidate = snapshot / fname
-                if candidate.exists():
-                    log.info("Found upscaler weights: %s", candidate)
-                    return str(candidate)
+            candidate = snapshot / "ltx-2.3-spatial-upscaler-x2-1.0.safetensors"
+            if candidate.exists():
+                log.info("Found upscaler weights: %s", candidate)
+                return str(candidate)
 
     # Not cached locally — try downloading
     try:
@@ -179,18 +178,9 @@ def _get_upscaler_weights() -> str | None:
         )
         log.info("Downloaded upscaler weights: %s", path)
         return path
-    except Exception:
-        # Try LTX-2 as fallback
-        try:
-            path = hf_hub_download(
-                repo_id="Lightricks/LTX-2",
-                filename="ltx-2-spatial-upscaler-x2-1.0.safetensors",
-            )
-            log.info("Downloaded upscaler weights (LTX-2): %s", path)
-            return path
-        except Exception as e:
-            log.warning("Could not find or download upscaler weights: %s", e)
-            return None
+    except Exception as e:
+        log.warning("Could not find or download upscaler weights: %s", e)
+        return None
 
 
 def _compute_progress(stage: int, step: int, total: int, is_two_stage: bool = False) -> float:
@@ -278,7 +268,6 @@ async def run_mlx_generation(
     output_path: str,
     image: str | None = None,
     image_strength: float = 1.0,
-    tiling: str = "auto",
     upscale: bool = False,
     ffmpeg_upscale: bool = False,
     preview_interval: int = 0,
@@ -287,15 +276,10 @@ async def run_mlx_generation(
     progress_callback: Callable[..., Awaitable[None]] | None = None,
     venv_python: str | None = None,
 ) -> dict:
-    """Run MLX video generation as an async subprocess.
+    """Run LTX-2.3 video generation as an async subprocess.
 
-    For quantized models on 32GB machines, text encoding runs in a separate
-    subprocess first. The embeddings are saved to a temp file and passed to
-    the generation subprocess via the LTX_PRECOMPUTED_EMBEDDINGS env var.
-
-    When upscale is True and running v2.3, the two-stage neural upscale
-    pipeline is used: generate at half resolution, upscale latent 2x with
-    the learned LatentUpsampler, then refine at target resolution.
+    Text encoding runs in a separate subprocess first (for 32GB memory
+    management). Embeddings are passed via LTX_PRECOMPUTED_EMBEDDINGS env var.
 
     Args:
         prompt: Text prompt describing the video to generate.
@@ -307,34 +291,27 @@ async def run_mlx_generation(
         output_path: Path where the output MP4 will be written.
         image: Optional path to a reference image for I2V generation.
         image_strength: Strength of image conditioning (0.0-1.0).
-        tiling: Tiling mode (``"auto"``, ``"on"``, ``"off"``).
-        upscale: If True, use two-stage neural upscale pipeline (v2.3) or
-            ffmpeg lanczos upscale (v2.0).
+        upscale: If True, use two-stage neural upscale pipeline.
+        ffmpeg_upscale: If True, apply ffmpeg lanczos 2x post-processing.
+        preview_interval: Emit preview frames every N diffusion steps (0=off).
+        skip_bwe: If True, disable bandwidth extension (16kHz audio).
+        lora_args: Optional LoRA arguments (--lora path:strength).
         progress_callback: Optional async callback invoked with
             ``(step, total_steps, stage, pct, status=None)`` where ``pct``
             is 0.0-1.0 and ``status`` is an optional human-readable stage label.
         venv_python: Path to venv Python binary. Auto-detected if None.
 
     Returns:
-        Dictionary with ``output_path`` and ``subprocess_memory`` (memory stats
-        from the generation subprocess, or empty dict if unavailable).
+        Dictionary with ``output_path`` and ``subprocess_memory``.
 
     Raises:
         RuntimeError: If the subprocess exits with a non-zero code.
         FileNotFoundError: If the venv Python binary cannot be found.
     """
     python_bin = venv_python or get_venv_python()
-    model_repo, is_quantized, model_version = get_model_repo()
-
-    # Route to appropriate generation module based on model version
-    if model_version == "2.3":
-        module = "engine.generate_v23"
-        log.info("Using LTX-2.3 vendored pipeline")
-    elif is_quantized:
-        module = "engine.generate_av_quantized"
-        log.info("Using quantized inference wrapper (LTX-2.0)")
-    else:
-        module = "mlx_video.generate_av"
+    model_repo, is_quantized = get_model_repo()
+    module = "engine.generate_v23"
+    log.info("Using LTX-2.3 vendored pipeline")
 
     # Ensure output directory exists
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
@@ -368,38 +345,19 @@ async def run_mlx_generation(
         if progress_callback is not None:
             await progress_callback(0, 0, 0, 0.05, status="Text encoding complete")
 
-    if model_version == "2.3":
-        # LTX-2.3 uses --model-dir instead of --model-repo
-        cmd = [
-            python_bin,
-            "-m", module,
-            "--prompt", prompt,
-            "--height", str(height),
-            "--width", str(width),
-            "--num-frames", str(num_frames),
-            "--seed", str(seed),
-            "--fps", str(fps),
-            "--output-path", output_path,
-            "--model-dir", model_repo,
-            "--generate-audio",
-        ]
-    else:
-        cmd = [
-            python_bin,
-            "-m", module,
-            "--prompt", prompt,
-            "--height", str(height),
-            "--width", str(width),
-            "--num-frames", str(num_frames),
-            "--seed", str(seed),
-            "--fps", str(fps),
-            "--output-path", output_path,
-            "--model-repo", model_repo,
-            "--tiling", tiling,
-        ]
-        # Use 4-bit text encoder (only needed if not using precomputed embeddings)
-        if text_encoder_4bit and not embeddings_path:
-            cmd.extend(["--text-encoder-repo", text_encoder_4bit])
+    cmd = [
+        python_bin,
+        "-m", module,
+        "--prompt", prompt,
+        "--height", str(height),
+        "--width", str(width),
+        "--num-frames", str(num_frames),
+        "--seed", str(seed),
+        "--fps", str(fps),
+        "--output-path", output_path,
+        "--model-dir", model_repo,
+        "--generate-audio",
+    ]
 
     if image is not None:
         cmd.extend(["--image", image, "--image-strength", str(image_strength)])
@@ -409,8 +367,7 @@ async def run_mlx_generation(
         cmd.extend(lora_args)
 
     is_two_stage = False
-    if upscale and model_version == "2.3":
-        # Two-stage neural upscale: find upsampler weights and pass path
+    if upscale:
         upscaler_path = _get_upscaler_weights()
         if upscaler_path:
             cmd.extend(["--upscale", upscaler_path])
@@ -419,9 +376,6 @@ async def run_mlx_generation(
         else:
             cmd.append("--ffmpeg-upscale")
             log.info("Neural upscaler weights not found, falling back to ffmpeg lanczos 2x")
-    elif upscale:
-        # LTX-2.0 fallback: ffmpeg lanczos (--upscale without path not supported)
-        log.info("Upscale requested for v2.0 — not supported, skipping")
 
     if ffmpeg_upscale:
         cmd.append("--ffmpeg-upscale")

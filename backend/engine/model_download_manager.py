@@ -24,11 +24,11 @@ _KNOWN_MODELS: list[dict[str, Any]] = [
         "id": "ltx-2.3-distilled-int8",
         "name": "LTX-2.3 Distilled (int8)",
         "description": "Primary video generation model. Diffusion Transformer, 8-step distilled, int8 quantized.",
-        "size_gb": 21.0,
+        "size_gb": 28.0,
         "model_type": "video_generator",
-        "hf_repo": "notapalindrome/ltx2-mlx-av",
-        "check_path": _HF_CACHE / "ltx23-mlx",
-        "check_files": ["config.json"],
+        "hf_repo": "dgrauet/ltx-2.3-mlx-distilled-q8",
+        "check_path": _HF_CACHE / "models--dgrauet--ltx-2.3-mlx-distilled-q8",
+        "check_files": ["refs/main"],
     },
     {
         "id": "gemma-3-12b-it-4bit",
@@ -159,8 +159,7 @@ class ModelDownloadManager:
         """Download a model from HuggingFace Hub. Blocking call.
 
         Updates download progress in self._downloads. Uses huggingface_hub
-        snapshot_download for standard HF repos, or custom logic for the
-        ltx23-mlx model which uses a custom cache path.
+        snapshot_download with standard HF cache.
 
         Args:
             download_id: Tracking ID for progress updates.
@@ -187,25 +186,10 @@ class ModelDownloadManager:
 
             hf_repo = model_def["hf_repo"]
 
-            if model_id == "ltx-2.3-distilled-int8":
-                # This model uses a custom local_dir outside standard HF cache
-                local_dir = model_def["check_path"]
-                local_dir.mkdir(parents=True, exist_ok=True)
+            with self._lock:
+                self._downloads[download_id]["progress"] = 0.1
 
-                with self._lock:
-                    self._downloads[download_id]["progress"] = 0.1
-
-                snapshot_download(
-                    repo_id=hf_repo,
-                    local_dir=str(local_dir),
-                    local_dir_use_symlinks=False,
-                )
-            else:
-                # Standard HF cache download
-                with self._lock:
-                    self._downloads[download_id]["progress"] = 0.1
-
-                snapshot_download(repo_id=hf_repo)
+            snapshot_download(repo_id=hf_repo)
 
             with self._lock:
                 self._downloads[download_id]["status"] = "completed"

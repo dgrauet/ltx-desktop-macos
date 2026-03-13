@@ -13,7 +13,7 @@ Single-stage pipeline (default):
 
 Usage::
 
-    python -m engine.generate_v23 --prompt "..." --model-dir /path/to/ltx23-mlx ...
+    python -m engine.generate_v23 --prompt "..." --model-dir /path/to/model ...
 
 Progress is reported on stderr as::
 

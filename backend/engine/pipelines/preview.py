@@ -107,7 +107,6 @@ class PreviewPipeline:
             output_path=str(output_path),
             image=image,
             image_strength=image_strength,
-            tiling="aggressive",
             upscale=False,
             ffmpeg_upscale=True,  # lanczos 2x: 384×256 → 768×512, ~1s, no GPU cost
             lora_args=lora_args,

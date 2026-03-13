@@ -122,7 +122,7 @@ class TextToVideoPipeline:
             seed=seed,
             fps=fps,
             output_path=str(output_path),
-            tiling="auto",
+
             upscale=upscale,
             lora_args=lora_args,
             preview_interval=2,

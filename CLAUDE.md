@@ -17,7 +17,7 @@ Native macOS app replicating **LTX Desktop** (Lightricks) with **100% local infe
 - **Variants**: `ltx-2.3-dev` (full bf16 ~42GB), `ltx-2.3-distilled` (8+4 steps), distilled-fp8
 - **Text encoder**: Gemma 3 12B (for video generation, NOT prompt enhancement)
 - **VAE**: rebuilt for 2.3, better texture preservation
-- **HuggingFace**: `Lightricks/LTX-2.3`, pre-converted MLX: `notapalindrome/ltx2-mlx-av`
+- **HuggingFace**: `Lightricks/LTX-2.3`, pre-converted MLX: `dgrauet/ltx-2.3-mlx-distilled-q8`
 
 ### MLX on Apple Silicon
 - Unified CPU/GPU memory — no data copying
@@ -218,7 +218,7 @@ Example:
 - **LTX-2.3**: [Blog](https://ltx.io/model/model-blog/ltx-2-3-release) · [GitHub](https://github.com/Lightricks/LTX-2) · [HuggingFace](https://huggingface.co/Lightricks/LTX-2.3) · [Prompting](https://ltx.video/blog/how-to-prompt-for-ltx-2)
 - **MLX**: [GitHub](https://github.com/ml-explore/mlx) · [Docs](https://ml-explore.github.io/mlx/) · [mlx-lm](https://github.com/ml-explore/mlx-lm) · [mlx-audio](https://github.com/Blaizzy/mlx-audio)
 - **TeaCache**: [LTX-specific](https://github.com/ali-vilab/TeaCache/tree/main/TeaCache4LTX-Video) · [Paper](https://liewfeng.github.io/TeaCache/)
-- **Models**: [MLX LTX-2](https://huggingface.co/notapalindrome/ltx2-mlx-av) · [Qwen3.5](https://huggingface.co/Qwen/Qwen3.5-2B)
+- **Models**: [MLX LTX-2.3](https://huggingface.co/dgrauet/ltx-2.3-mlx-distilled-q8) · [Qwen3.5](https://huggingface.co/Qwen/Qwen3.5-2B)
 - **LTX Desktop (reference)**: [GitHub](https://github.com/Lightricks/ltx-desktop)
 
 ---

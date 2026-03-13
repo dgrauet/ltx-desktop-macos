@@ -43,36 +43,46 @@ else
     echo -e "${GREEN}✓ huggingface-cli installed${NC}"
 fi
 
-# 3. Download LTX-2.3 official model (~43GB)
-# NOTE: This downloads the raw PyTorch checkpoint. To convert to MLX split format
-# with quantization, use: mlx-forge convert ltx-2.3 --quantize --bits 8
-# Install mlx-forge: pip install -e /path/to/mlx-forge (see https://github.com/dgrauet/mlx-forge)
-LTX_MODEL="Lightricks/LTX-2.3"
-LTX_CACHE_DIR="$HF_CACHE/models--Lightricks--LTX-2.3"
-LTX_MLX_DIR="$HF_CACHE/ltx23-mlx"
+# 3. Download LTX-2.3 pre-converted MLX model (int8 quantized, ~28GB)
+LTX_MODEL="dgrauet/ltx-2.3-mlx-distilled-q8"
+LTX_CACHE_DIR="$HF_CACHE/models--dgrauet--ltx-2.3-mlx-distilled-q8"
 
 echo ""
-echo -e "${BLUE}[1/2] LTX-2.3 video generation model${NC}"
+echo -e "${BLUE}[1/3] LTX-2.3 video generation model (MLX int8)${NC}"
 echo -e "  Model: ${LTX_MODEL}"
-echo -e "  Size:  ~43GB (distilled checkpoint)"
+echo -e "  Size:  ~28GB (pre-converted MLX, int8 quantized)"
 
-if [ -d "$LTX_MLX_DIR" ] && [ -f "$LTX_MLX_DIR/transformer.safetensors" ]; then
-    echo -e "${GREEN}✓ Already converted to MLX format${NC}"
-elif [ -d "$LTX_CACHE_DIR" ] && [ -f "$LTX_CACHE_DIR/refs/main" ]; then
-    echo -e "${GREEN}✓ Already downloaded (run 'mlx-forge convert ltx-2.3' to convert to MLX)${NC}"
+if [ -d "$LTX_CACHE_DIR" ] && [ -f "$LTX_CACHE_DIR/refs/main" ]; then
+    echo -e "${GREEN}✓ Already downloaded${NC}"
 else
-    echo -e "${YELLOW}  Downloading distilled checkpoint (this may take a while)...${NC}"
-    $HF_CLI download "$LTX_MODEL" --include "ltx-2.3-22b-distilled.safetensors"
-    echo -e "${GREEN}✓ LTX-2.3 checkpoint downloaded${NC}"
-    echo -e "${YELLOW}  Next step: mlx-forge convert ltx-2.3 --quantize --bits 8${NC}"
+    echo -e "${YELLOW}  Downloading (this may take a while)...${NC}"
+    $HF_CLI download "$LTX_MODEL"
+    echo -e "${GREEN}✓ LTX-2.3 MLX model downloaded${NC}"
 fi
 
-# 4. Download Qwen3.5-2B-4bit (MLX quantized) for prompt enhancement (~1.2GB)
+# 4. Download Gemma 3 12B IT 4-bit (text encoder for video generation, ~6GB)
+GEMMA_MODEL="mlx-community/gemma-3-12b-it-4bit"
+GEMMA_CACHE_DIR="$HF_CACHE/models--mlx-community--gemma-3-12b-it-4bit"
+
+echo ""
+echo -e "${BLUE}[2/3] Gemma 3 12B IT (4-bit) text encoder${NC}"
+echo -e "  Model: ${GEMMA_MODEL}"
+echo -e "  Size:  ~6GB"
+
+if [ -d "$GEMMA_CACHE_DIR" ] && [ -f "$GEMMA_CACHE_DIR/refs/main" ]; then
+    echo -e "${GREEN}✓ Already downloaded${NC}"
+else
+    echo -e "${YELLOW}  Downloading...${NC}"
+    $HF_CLI download "$GEMMA_MODEL"
+    echo -e "${GREEN}✓ Gemma 3 12B IT 4-bit downloaded${NC}"
+fi
+
+# 5. Download Qwen3.5-2B-4bit (MLX quantized) for prompt enhancement (~1.2GB)
 QWEN_MODEL="mlx-community/Qwen3.5-2B-4bit"
 QWEN_CACHE_DIR="$HF_CACHE/models--mlx-community--Qwen3.5-2B-4bit"
 
 echo ""
-echo -e "${BLUE}[2/2] Qwen3.5-2B-4bit prompt enhancer (MLX quantized)${NC}"
+echo -e "${BLUE}[3/3] Qwen3.5-2B-4bit prompt enhancer (MLX quantized)${NC}"
 echo -e "  Model: ${QWEN_MODEL}"
 echo -e "  Size:  ~1.2GB"
 
@@ -84,7 +94,7 @@ else
     echo -e "${GREEN}✓ Qwen3.5-2B-4bit downloaded${NC}"
 fi
 
-# 5. Verify and report
+# 6. Verify and report
 echo ""
 echo -e "${BLUE}╔══════════════════════════════════════════╗${NC}"
 echo -e "${BLUE}║           Download Summary                ║${NC}"
@@ -92,16 +102,20 @@ echo -e "${BLUE}╚════════════════════�
 
 TOTAL_SIZE=0
 
-if [ -d "$LTX_MLX_DIR" ]; then
-    LTX_SIZE=$(du -sg "$LTX_MLX_DIR" 2>/dev/null | cut -f1 || echo "?")
-    echo -e "  LTX-2.3 (MLX): ${GREEN}${LTX_SIZE}GB${NC} — $LTX_MLX_DIR"
-    TOTAL_SIZE=$((TOTAL_SIZE + LTX_SIZE))
-elif [ -d "$LTX_CACHE_DIR" ]; then
+if [ -d "$LTX_CACHE_DIR" ]; then
     LTX_SIZE=$(du -sg "$LTX_CACHE_DIR" 2>/dev/null | cut -f1 || echo "?")
-    echo -e "  LTX-2.3 (raw): ${GREEN}${LTX_SIZE}GB${NC} — $LTX_CACHE_DIR"
+    echo -e "  LTX-2.3 (q8): ${GREEN}${LTX_SIZE}GB${NC} — $LTX_CACHE_DIR"
     TOTAL_SIZE=$((TOTAL_SIZE + LTX_SIZE))
 else
-    echo -e "  LTX-2.3:   ${RED}not found${NC}"
+    echo -e "  LTX-2.3:      ${RED}not found${NC}"
+fi
+
+if [ -d "$GEMMA_CACHE_DIR" ]; then
+    GEMMA_SIZE=$(du -sg "$GEMMA_CACHE_DIR" 2>/dev/null | cut -f1 || echo "?")
+    echo -e "  Gemma 3 4bit: ${GREEN}${GEMMA_SIZE}GB${NC} — $GEMMA_CACHE_DIR"
+    TOTAL_SIZE=$((TOTAL_SIZE + GEMMA_SIZE))
+else
+    echo -e "  Gemma 3:      ${RED}not found${NC}"
 fi
 
 if [ -d "$QWEN_CACHE_DIR" ]; then
@@ -109,10 +123,10 @@ if [ -d "$QWEN_CACHE_DIR" ]; then
     echo -e "  Qwen3.5-4bit: ${GREEN}${QWEN_SIZE}GB${NC} — $QWEN_CACHE_DIR"
     TOTAL_SIZE=$((TOTAL_SIZE + QWEN_SIZE))
 else
-    echo -e "  Qwen3.5:   ${RED}not found${NC}"
+    echo -e "  Qwen3.5:      ${RED}not found${NC}"
 fi
 
-echo -e "  Total:     ${GREEN}~${TOTAL_SIZE}GB${NC}"
+echo -e "  Total:        ${GREEN}~${TOTAL_SIZE}GB${NC}"
 echo ""
 echo -e "${GREEN}✓ Model download complete!${NC}"
 echo -e "  Start dev: ./scripts/dev.sh"
