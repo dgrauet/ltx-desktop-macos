@@ -30,13 +30,14 @@ import gc
 import logging
 from pathlib import Path
 
+import mlx.core as mx
+
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
 
 
 def _materialize(tensor) -> None:
     """Materialize an MLX lazy tensor (calls mlx.core.eval, NOT Python eval)."""
-    import mlx.core as mx
     mx.eval(tensor)  # noqa: S307 — this is mlx.core.eval (tensor materialization), not Python eval
 
 
@@ -70,8 +71,6 @@ def _run_gemma_forward(args, model_path: Path) -> tuple:
     Returns:
         (all_hidden_states, attention_mask) — list of layer outputs and mask.
     """
-    import mlx.core as mx
-
     text_encoder_path = _resolve_text_encoder_path(args, model_path)
 
     log.info("Phase 1: Loading language model from %s", text_encoder_path)
@@ -130,8 +129,6 @@ def _encode(args, model_path: Path) -> None:
     - Dual aggregate embeddings (video: 4096-dim, audio: 2048-dim)
     - 8-layer gated-attention connectors
     """
-    import mlx.core as mx
-
     # Phase 1: Gemma forward pass
     all_hidden_states, attention_mask = _run_gemma_forward(args, model_path)
 

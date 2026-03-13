@@ -21,8 +21,11 @@ log = logging.getLogger(__name__)
 # Default model repo on HuggingFace (int8 quantized, MLX split format)
 DEFAULT_MODEL_REPO = "dgrauet/ltx-2.3-mlx-distilled-q8"
 
+# HuggingFace cache root
+_HF_CACHE = Path.home() / ".cache" / "huggingface" / "hub"
+
 # Legacy local path (from earlier local_dir downloads — checked as fallback)
-_LEGACY_LOCAL_PATH = Path.home() / ".cache/huggingface/hub/ltx23-mlx"
+_LEGACY_LOCAL_PATH = _HF_CACHE / "ltx23-mlx"
 
 # Regex patterns for stderr progress lines
 _STAGE_RE = re.compile(r"^STAGE:(\d+):STEP:(\d+):(\d+)")
@@ -92,14 +95,10 @@ def _resolve_hf_model(repo_id: str) -> str | None:
     try:
         from huggingface_hub import try_to_load_from_cache
 
-        # Check that both config and main model weights are cached
-        config_cached = try_to_load_from_cache(repo_id, "config.json")
+        # Check that main model weights are cached (implies config is too)
         weights_cached = try_to_load_from_cache(repo_id, "transformer.safetensors")
-        if (
-            config_cached and isinstance(config_cached, str)
-            and weights_cached and isinstance(weights_cached, str)
-        ):
-            return str(Path(config_cached).parent)
+        if weights_cached and isinstance(weights_cached, str):
+            return str(Path(weights_cached).parent)
     except Exception as e:
         log.debug("Could not check HF cache for %s: %s", repo_id, e)
     return None
@@ -134,8 +133,7 @@ def _get_text_encoder_4bit() -> str | None:
     Uses the 4-bit version (~6GB) instead.
     """
     # Check for locally cached 4-bit text encoder
-    cache_root = Path.home() / ".cache" / "huggingface" / "hub"
-    model_dir = cache_root / "models--mlx-community--gemma-3-12b-it-4bit"
+    model_dir = _HF_CACHE / "models--mlx-community--gemma-3-12b-it-4bit"
     if model_dir.exists():
         snapshots = model_dir / "snapshots"
         if snapshots.exists():
@@ -157,24 +155,26 @@ def _get_upscaler_weights() -> str | None:
     Returns:
         Path to the upscaler weights file, or None if unavailable.
     """
-    cache_root = Path.home() / ".cache" / "huggingface" / "hub"
+    _UPSCALER_REPO = "Lightricks/LTX-2.3"
+    _UPSCALER_FILE = "ltx-2.3-spatial-upscaler-x2-1.0.safetensors"
 
-    repo_dir = cache_root / "models--Lightricks--LTX-2.3" / "snapshots"
+    # Check HF cache for upscaler weights inside main LTX-2.3 repo
+    repo_dir = _HF_CACHE / "models--Lightricks--LTX-2.3" / "snapshots"
     if repo_dir.exists():
         for snapshot in sorted(repo_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
-            candidate = snapshot / "ltx-2.3-spatial-upscaler-x2-1.0.safetensors"
+            candidate = snapshot / _UPSCALER_FILE
             if candidate.exists():
                 log.info("Found upscaler weights: %s", candidate)
                 return str(candidate)
 
-    # Not cached locally — try downloading
+    # Not cached locally — download just the upscaler file from the main repo
     try:
         from huggingface_hub import hf_hub_download
 
-        log.info("Downloading upscaler weights from Lightricks/LTX-2.3...")
+        log.info("Downloading upscaler weights from %s...", _UPSCALER_REPO)
         path = hf_hub_download(
-            repo_id="Lightricks/LTX-2.3",
-            filename="ltx-2.3-spatial-upscaler-x2-1.0.safetensors",
+            repo_id=_UPSCALER_REPO,
+            filename=_UPSCALER_FILE,
         )
         log.info("Downloaded upscaler weights: %s", path)
         return path
@@ -396,7 +396,6 @@ async def run_mlx_generation(
     # Set up environment with precomputed embeddings path
     env = None
     if embeddings_path:
-        import os
         env = os.environ.copy()
         env["LTX_PRECOMPUTED_EMBEDDINGS"] = embeddings_path
 

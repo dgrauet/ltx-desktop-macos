@@ -56,8 +56,9 @@ _KNOWN_MODELS: list[dict[str, Any]] = [
         "description": "Neural 2x upscaler for video frames. Used in two-stage pipeline for higher resolution output.",
         "size_gb": 1.0,
         "model_type": "upscaler",
-        "hf_repo": "Lightricks/LTX-Video-2.3-Spatial-Upscaler",
-        "check_path": _HF_CACHE / "models--Lightricks--LTX-Video-2.3-Spatial-Upscaler",
+        "hf_repo": "Lightricks/LTX-2.3",
+        "hf_allow_patterns": ["ltx-2.3-spatial-upscaler-x2-1.0.safetensors"],
+        "check_path": _HF_CACHE / "models--Lightricks--LTX-2.3",
         "check_files": ["refs/main"],
     },
 ]
@@ -79,6 +80,17 @@ def _is_downloaded(model_def: dict[str, Any]) -> bool:
     for cf in model_def["check_files"]:
         if not (check_path / cf).exists():
             return False
+    # For partial downloads (e.g. upscaler from a larger repo), verify the
+    # actual files exist in a snapshot directory
+    allow_patterns = model_def.get("hf_allow_patterns")
+    if allow_patterns:
+        snapshots = check_path / "snapshots"
+        if not snapshots.exists():
+            return False
+        for snapshot in snapshots.iterdir():
+            if all((snapshot / fn).exists() for fn in allow_patterns):
+                return True
+        return False
     return True
 
 
@@ -189,7 +201,11 @@ class ModelDownloadManager:
             with self._lock:
                 self._downloads[download_id]["progress"] = 0.1
 
-            snapshot_download(repo_id=hf_repo)
+            allow_patterns = model_def.get("hf_allow_patterns")
+            snapshot_download(
+                repo_id=hf_repo,
+                **({"allow_patterns": allow_patterns} if allow_patterns else {}),
+            )
 
             with self._lock:
                 self._downloads[download_id]["status"] = "completed"
