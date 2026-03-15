@@ -268,6 +268,7 @@ async def run_mlx_generation(
     output_path: str,
     image: str | None = None,
     image_strength: float = 1.0,
+    num_steps: int = 8,
     upscale: bool = False,
     ffmpeg_upscale: bool = False,
     preview_interval: int = 0,
@@ -291,6 +292,7 @@ async def run_mlx_generation(
         output_path: Path where the output MP4 will be written.
         image: Optional path to a reference image for I2V generation.
         image_strength: Strength of image conditioning (0.0-1.0).
+        num_steps: Number of denoising steps (default 8 for distilled model).
         upscale: If True, use two-stage neural upscale pipeline.
         ffmpeg_upscale: If True, apply ffmpeg lanczos 2x post-processing.
         preview_interval: Emit preview frames every N diffusion steps (0=off).
@@ -356,6 +358,7 @@ async def run_mlx_generation(
         "--fps", str(fps),
         "--output-path", output_path,
         "--model-dir", model_repo,
+        "--num-steps", str(num_steps),
         "--generate-audio",
     ]
 

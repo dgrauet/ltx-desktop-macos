@@ -18,7 +18,7 @@ class GenerationViewModel: ObservableObject {
     @Published var sourceImagePath: String?
     @Published var sourceImageData: Data?
     @Published var isEnhancing: Bool = false
-    @Published var imageStrength: Double = 0.85
+    @Published var imageStrength: Double = 1.0
     @Published var upscale: Bool = false
     @Published var statusMessage: String?
 

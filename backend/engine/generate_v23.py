@@ -281,7 +281,7 @@ def main() -> None:
     parser.add_argument("--num-steps", type=int, default=8)
     parser.add_argument("--output-path", type=str, required=True)
     parser.add_argument("--image", type=str, default=None)
-    parser.add_argument("--image-strength", type=float, default=0.85)
+    parser.add_argument("--image-strength", type=float, default=1.0)
     parser.add_argument("--generate-audio", action="store_true")
     parser.add_argument(
         "--upscale", type=str, default=None,
@@ -624,10 +624,10 @@ def _run_two_stage(
 
 
 def _encode_image(image_path: str, model_dir: Path, height: int, width: int) -> mx.array:
-    """Encode a reference image using VAE encoder.
+    """Encode a reference image using the mlx_video VAE encoder.
 
-    Resizes the image to match the target generation resolution, then
-    encodes it to the latent space via the VAE encoder.
+    Uses the reference mlx_video VideoEncoder implementation directly
+    for correct Conv3d operations (native mx.conv3d vs our custom slice-based).
 
     Args:
         image_path: Path to the source image file.
@@ -638,29 +638,66 @@ def _encode_image(image_path: str, model_dir: Path, height: int, width: int) -> 
     Returns:
         (1, 128, 1, H/32, W/32) normalized latent tensor.
     """
+    import json
     from PIL import Image
+    from mlx_video.models.ltx.video_vae.encoder import VideoEncoder
+    from mlx_video.models.ltx.video_vae.video_vae import NormLayerType, LogVarianceType
+    from mlx_video.utils import prepare_image_for_encoding
 
     log.info("Encoding reference image: %s at %dx%d", image_path, width, height)
 
-    # Load and resize to target resolution
+    # Load encoder config
+    config_path = model_dir / "embedded_config.json"
+    encoder_blocks = []
+    patch_size = 4
+    if config_path.exists():
+        with open(config_path) as f:
+            vae_cfg = json.load(f).get("vae", {})
+        encoder_blocks = [(b[0], b[1]) for b in vae_cfg.get("encoder_blocks", [])]
+        patch_size = vae_cfg.get("patch_size", 4)
+        log.info("Using encoder config from embedded_config.json")
+
+    # Create reference encoder
+    encoder = VideoEncoder(
+        encoder_blocks=encoder_blocks,
+        norm_layer=NormLayerType.PIXEL_NORM,
+        latent_log_var=LogVarianceType.UNIFORM,
+        patch_size=patch_size,
+    )
+
+    # Load weights (manual prefix stripping to avoid tree_unflatten numeric key bug)
+    weights_path = model_dir / "vae_encoder.safetensors"
+    if not weights_path.exists():
+        raise FileNotFoundError(f"vae_encoder.safetensors not found in {model_dir}")
+
+    raw = mx.load(str(weights_path))
+    prefix = "vae_encoder."
+    encoder.load_weights(
+        [(k[len(prefix):], v) for k, v in raw.items() if k.startswith(prefix)],
+        strict=False,
+    )
+    # Load per-channel normalization statistics
+    mean_key = f"{prefix}per_channel_statistics._mean_of_means"
+    std_key = f"{prefix}per_channel_statistics._std_of_means"
+    if mean_key in raw:
+        encoder.latent_mean = raw[mean_key]
+        encoder.latent_std = raw[std_key]
+
+    mx.eval(encoder.parameters())  # noqa: S307
+    log.info("VAE encoder loaded: %.2f GB active", mx.get_active_memory() / (1024**3))
+
+    # Load and prepare image
     img = Image.open(image_path).convert("RGB")
-    img = img.resize((width, height), Image.LANCZOS)
+    img_arr = mx.array(np.array(img).astype(np.float32) / 255.0)
+    img_tensor = prepare_image_for_encoding(img_arr, height, width)
 
-    # Normalize to [-1, 1]
-    img_array = np.array(img).astype(np.float32) / 255.0
-    img_array = img_array * 2.0 - 1.0
-    # [H, W, 3] -> [1, 3, 1, H, W]
-    img_tensor = mx.array(img_array).transpose(2, 0, 1)[None, :, None, :, :]
-
-    # Load VAE encoder
-    from engine.ltx23_model.vae_encoder import load_vae_encoder, encode_image
-
-    encoder = load_vae_encoder(model_dir)
-    latent = encode_image(img_tensor, encoder)
+    # Encode
+    latent = encoder(img_tensor)
+    mx.eval(latent)  # noqa: S307
     log.info("Image encoded to latent: %s", latent.shape)
 
     # Free encoder
-    del encoder
+    del encoder, raw
     gc.collect()
     mx.clear_cache()
 

@@ -43,7 +43,7 @@ struct I2VRequest: Codable {
     var seed: Int = -1
     var guidanceScale: Double = 1.0
     var fps: Int = 24
-    var imageStrength: Double = 0.85
+    var imageStrength: Double = 1.0
     var upscale: Bool = false
 
     enum CodingKeys: String, CodingKey {

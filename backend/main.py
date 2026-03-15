@@ -126,7 +126,7 @@ class I2VRequest(BaseModel):
     seed: int = Field(default=-1, description="Random seed (-1 for random)")
     guidance_scale: float = Field(default=1.0, ge=0.0, le=20.0)
     fps: int = Field(default=24, ge=1, le=60)
-    image_strength: float = Field(default=0.85, ge=0.0, le=1.0)
+    image_strength: float = Field(default=1.0, ge=0.0, le=1.0)
     upscale: bool = Field(default=False, description="2x spatial upscale via latent upsampler")
 
 
