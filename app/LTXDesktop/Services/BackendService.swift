@@ -122,6 +122,17 @@ class BackendService: ObservableObject {
         return try await get("/api/v1/models")
     }
 
+    private struct ModelSelectResponse: Codable {
+        let success: Bool
+    }
+
+    func selectModel(modelId: String) async throws {
+        let _: ModelSelectResponse = try await post(
+            "/api/v1/models/select",
+            body: ModelSelectRequest(modelId: modelId)
+        )
+    }
+
     func downloadModel(modelId: String) async throws -> ModelDownloadResponse {
         return try await post(
             "/api/v1/models/download",

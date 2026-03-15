@@ -21,13 +21,33 @@ _HF_CACHE = Path.home() / ".cache" / "huggingface" / "hub"
 # Known model definitions: id -> metadata
 _KNOWN_MODELS: list[dict[str, Any]] = [
     {
-        "id": "ltx-2.3-distilled-int8",
+        "id": "ltx-2.3-distilled-q8",
         "name": "LTX-2.3 Distilled (int8)",
-        "description": "Primary video generation model. Diffusion Transformer, 8-step distilled, int8 quantized.",
+        "description": "Recommended. Best quality/size balance. 8-step distilled, int8 quantized.",
         "size_gb": 28.0,
         "model_type": "video_generator",
         "hf_repo": "dgrauet/ltx-2.3-mlx-distilled-q8",
         "check_path": _HF_CACHE / "models--dgrauet--ltx-2.3-mlx-distilled-q8",
+        "check_files": ["refs/main"],
+    },
+    {
+        "id": "ltx-2.3-distilled-q4",
+        "name": "LTX-2.3 Distilled (int4)",
+        "description": "Smaller and faster. Some quality loss. 8-step distilled, int4 quantized.",
+        "size_gb": 15.0,
+        "model_type": "video_generator",
+        "hf_repo": "dgrauet/ltx-2.3-mlx-distilled-q4",
+        "check_path": _HF_CACHE / "models--dgrauet--ltx-2.3-mlx-distilled-q4",
+        "check_files": ["refs/main"],
+    },
+    {
+        "id": "ltx-2.3-distilled-bf16",
+        "name": "LTX-2.3 Distilled (bf16)",
+        "description": "Full precision. Best quality, largest size. Requires 64GB+ RAM.",
+        "size_gb": 42.0,
+        "model_type": "video_generator",
+        "hf_repo": "dgrauet/ltx-2.3-mlx-distilled",
+        "check_path": _HF_CACHE / "models--dgrauet--ltx-2.3-mlx-distilled",
         "check_files": ["refs/main"],
     },
     {

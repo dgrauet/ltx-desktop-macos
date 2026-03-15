@@ -49,6 +49,7 @@ class PreviewPipeline:
         image_strength: float = 1.0,
         upscale: bool = False,
         lora_args: list[str] | None = None,
+        model_repo_id: str | None = None,
         progress_callback: Callable[[int, int, float, str | None], None] | None = None,
     ) -> GenerationResult:
         """Run the rapid preview pipeline.
@@ -111,6 +112,7 @@ class PreviewPipeline:
             ffmpeg_upscale=True,  # lanczos 2x: 384×256 → 768×512, ~1s, no GPU cost
             lora_args=lora_args,
             progress_callback=_progress_adapter,
+            model_repo_id=model_repo_id,
         )
 
         stages["generation"] = time.monotonic() - t0

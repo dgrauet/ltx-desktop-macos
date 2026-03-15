@@ -32,10 +32,20 @@ struct ModelInfo: Identifiable, Codable {
 struct ModelListResponse: Codable {
     let models: [ModelInfo]
     let totalDiskGb: Double
+    let selectedVideoModel: String?
 
     enum CodingKeys: String, CodingKey {
         case models
         case totalDiskGb = "total_disk_gb"
+        case selectedVideoModel = "selected_video_model"
+    }
+}
+
+struct ModelSelectRequest: Encodable {
+    let modelId: String
+
+    enum CodingKeys: String, CodingKey {
+        case modelId = "model_id"
     }
 }
 

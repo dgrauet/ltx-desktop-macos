@@ -7,6 +7,7 @@ import Combine
 class ModelsViewModel: ObservableObject {
     @Published var models: [ModelInfo] = []
     @Published var totalDiskGb: Double = 0.0
+    @Published var selectedVideoModel: String? // HF repo ID
     @Published var isLoading: Bool = false
     @Published var errorMessage: String?
 
@@ -33,6 +34,7 @@ class ModelsViewModel: ObservableObject {
                 let response = try await service.listModels()
                 self.models = response.models
                 self.totalDiskGb = response.totalDiskGb
+                self.selectedVideoModel = response.selectedVideoModel
             } catch {
                 self.errorMessage = "Failed to load models: \(error.localizedDescription)"
             }
@@ -72,6 +74,22 @@ class ModelsViewModel: ObservableObject {
                 self.errorMessage = "Failed to delete model: \(error.localizedDescription)"
             }
         }
+    }
+
+    func selectModel(modelId: String, service: BackendService) {
+        errorMessage = nil
+        Task {
+            do {
+                try await service.selectModel(modelId: modelId)
+                self.loadModels(service: service)
+            } catch {
+                self.errorMessage = "Failed to select model: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    func isSelected(_ model: ModelInfo) -> Bool {
+        model.hfRepo == selectedVideoModel
     }
 
     func confirmDelete(model: ModelInfo) {

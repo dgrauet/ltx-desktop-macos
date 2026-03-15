@@ -352,9 +352,32 @@ struct SettingsView: View {
                     }
                 } else if model.downloaded {
                     HStack(spacing: 8) {
-                        Text("Downloaded")
-                            .font(.caption)
-                            .foregroundStyle(.green)
+                        // "Use" button for video generators
+                        if model.modelType == "video_generator" {
+                            if modelsVM.isSelected(model) {
+                                Text("Active")
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 3)
+                                    .background(Color.accentColor)
+                                    .clipShape(RoundedRectangle(cornerRadius: 5))
+                            } else {
+                                Button {
+                                    modelsVM.selectModel(modelId: model.id, service: backendService)
+                                } label: {
+                                    Text("Use")
+                                        .font(.caption)
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                            }
+                        } else {
+                            Text("Downloaded")
+                                .font(.caption)
+                                .foregroundStyle(.green)
+                        }
 
                         Button {
                             modelsVM.confirmDelete(model: model)

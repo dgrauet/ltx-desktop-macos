@@ -52,6 +52,9 @@ lora_manager = LoRAManager(model_manager)
 tts_engine = TTSEngine()
 audio_mixer = AudioMixer()
 
+# Selected video generation model (HF repo ID, None = default)
+selected_video_model: str | None = None
+
 # Job tracking: job_id -> {status, progress, result, error, job_type, prompt, priority}
 jobs: dict[str, dict[str, Any]] = {}
 
@@ -68,7 +71,7 @@ job_queue = JobQueue()
 async def lifespan(app: FastAPI):
     """Startup: load model stub, warm up, seed history, start queue. Shutdown: unload."""
     log.info("Starting LTX Desktop backend...")
-    model_manager.load_model("dgrauet/ltx-2.3-mlx-distilled-q8")
+    model_manager.load_model("default")  # Stub — actual model resolved at generation time
     aggressive_cleanup()
     # Populate history with existing video files not yet tracked
     seeded = history_store.seed_from_existing_files()
@@ -358,10 +361,11 @@ class ModelInfoResponse(BaseModel):
 
 
 class ModelListResponse(BaseModel):
-    """List of models with total disk usage."""
+    """List of models with total disk usage and selected model."""
 
     models: list[ModelInfoResponse]
     total_disk_gb: float
+    selected_video_model: str | None = None
 
 
 class ModelDownloadRequest(BaseModel):
@@ -398,13 +402,42 @@ class ModelDeleteResponse(BaseModel):
 
 @app.get("/api/v1/models", response_model=ModelListResponse)
 async def list_models():
-    """List all known models with download status and size."""
+    """List all known models with download status, size, and selected model."""
+    global selected_video_model
     models = model_download_manager.list_models()
     total = sum(m["size_gb"] for m in models if m["downloaded"])
     return ModelListResponse(
         models=[ModelInfoResponse(**m) for m in models],
         total_disk_gb=round(total, 2),
+        selected_video_model=selected_video_model,
     )
+
+
+class ModelSelectRequest(BaseModel):
+    """Request to select a video generation model."""
+    model_id: str = Field(..., min_length=1)
+
+
+@app.post("/api/v1/models/select")
+async def select_model(req: ModelSelectRequest):
+    """Select which video generation model to use for generation."""
+    global selected_video_model
+    model = model_download_manager.get_model(req.model_id)
+    if model is None:
+        raise HTTPException(status_code=404, detail=f"Unknown model: {req.model_id}")
+    if model["model_type"] != "video_generator":
+        raise HTTPException(status_code=400, detail="Can only select video generator models")
+    if not model["downloaded"]:
+        raise HTTPException(status_code=400, detail=f"Model not downloaded: {req.model_id}")
+
+    # Look up the HF repo for this model ID
+    for m in model_download_manager.list_models():
+        if m["id"] == req.model_id:
+            selected_video_model = m["hf_repo"]
+            break
+
+    log.info("Selected video model: %s (%s)", req.model_id, selected_video_model)
+    return {"success": True, "model_id": req.model_id, "hf_repo": selected_video_model}
 
 
 @app.post("/api/v1/models/download", response_model=ModelDownloadResponse)
@@ -586,6 +619,7 @@ async def _run_t2v(job_id: str, req: T2VRequest) -> None:
             fps=req.fps,
             upscale=req.upscale,
             lora_args=lora_manager.get_active_lora_args() or None,
+            model_repo_id=selected_video_model,
             progress_callback=progress_cb,
         )
         jobs[job_id]["status"] = "completed"
@@ -638,6 +672,7 @@ async def _run_preview(job_id: str, req: PreviewRequest) -> None:
             image_strength=req.image_strength,
             upscale=req.upscale,
             lora_args=lora_manager.get_active_lora_args() or None,
+            model_repo_id=selected_video_model,
             progress_callback=progress_cb,
         )
         jobs[job_id]["status"] = "completed"
@@ -693,6 +728,7 @@ async def _run_i2v(job_id: str, req: I2VRequest) -> None:
             guidance_scale=req.guidance_scale,
             fps=req.fps,
             image_strength=req.image_strength,
+            model_repo_id=selected_video_model,
             upscale=req.upscale,
             lora_args=lora_manager.get_active_lora_args() or None,
             progress_callback=progress_cb,

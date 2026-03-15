@@ -53,31 +53,34 @@ def _is_quantized_model(model_path: Path) -> bool:
     return qconfig.exists()
 
 
-def get_model_repo() -> tuple[str, bool]:
+def get_model_repo(repo_id: str | None = None) -> tuple[str, bool]:
     """Return the model path and whether it's quantized.
 
-    Resolves the default HuggingFace repo from local cache, with fallback
-    to a legacy local path for backwards compatibility.
+    Args:
+        repo_id: HuggingFace repo ID to resolve. Uses DEFAULT_MODEL_REPO if None.
 
     Returns:
         Tuple of (model_path, is_quantized).
     """
+    target_repo = repo_id or DEFAULT_MODEL_REPO
+
     # Try HF standard cache first
-    model_path = _resolve_hf_model(DEFAULT_MODEL_REPO)
+    model_path = _resolve_hf_model(target_repo)
     if model_path:
         quantized = _is_quantized_model(Path(model_path))
-        log.info("Using HF model: %s (%s)", DEFAULT_MODEL_REPO, model_path)
+        log.info("Using HF model: %s (%s)", target_repo, model_path)
         return model_path, quantized
 
-    # Fallback: legacy local path (from earlier local_dir downloads)
-    if _LEGACY_LOCAL_PATH.exists() and (_LEGACY_LOCAL_PATH / "transformer.safetensors").exists():
-        quantized = _is_quantized_model(_LEGACY_LOCAL_PATH)
-        log.info("Using legacy local model: %s", _LEGACY_LOCAL_PATH)
-        return str(_LEGACY_LOCAL_PATH), quantized
+    # Fallback: legacy local path (only for default repo)
+    if target_repo == DEFAULT_MODEL_REPO:
+        if _LEGACY_LOCAL_PATH.exists() and (_LEGACY_LOCAL_PATH / "transformer.safetensors").exists():
+            quantized = _is_quantized_model(_LEGACY_LOCAL_PATH)
+            log.info("Using legacy local model: %s", _LEGACY_LOCAL_PATH)
+            return str(_LEGACY_LOCAL_PATH), quantized
 
     # Last resort: return repo ID (generation will fail if not downloadable)
-    log.warning("Could not resolve model %s — returning repo ID", DEFAULT_MODEL_REPO)
-    return DEFAULT_MODEL_REPO, True
+    log.warning("Could not resolve model %s — returning repo ID", target_repo)
+    return target_repo, True
 
 
 def _resolve_hf_model(repo_id: str) -> str | None:
@@ -276,6 +279,7 @@ async def run_mlx_generation(
     lora_args: list[str] | None = None,
     progress_callback: Callable[..., Awaitable[None]] | None = None,
     venv_python: str | None = None,
+    model_repo_id: str | None = None,
 ) -> dict:
     """Run LTX-2.3 video generation as an async subprocess.
 
@@ -311,9 +315,9 @@ async def run_mlx_generation(
         FileNotFoundError: If the venv Python binary cannot be found.
     """
     python_bin = venv_python or get_venv_python()
-    model_repo, is_quantized = get_model_repo()
+    model_repo, is_quantized = get_model_repo(model_repo_id)
     module = "engine.generate_v23"
-    log.info("Using LTX-2.3 vendored pipeline")
+    log.info("Using LTX-2.3 vendored pipeline (%s)", model_repo_id or "default")
 
     # Ensure output directory exists
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
