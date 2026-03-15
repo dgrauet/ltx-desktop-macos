@@ -591,8 +591,14 @@ struct GenerationView: View {
     private var previewPanel: some View {
         Group {
             if let player = player {
-                VideoPlayer(player: player)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                ZStack(alignment: .topTrailing) {
+                    VideoPlayer(player: player)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                    if let url = vm.outputVideoURL {
+                        videoActionButtons(url: url)
+                    }
+                }
             } else if vm.isGenerating, let frame = vm.progressiveFrame {
                 // Progressive diffusion display during generation
                 VStack(spacing: 8) {
@@ -618,5 +624,52 @@ struct GenerationView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 12))
             }
         }
+    }
+
+    // MARK: - Video Action Buttons
+
+    private func videoActionButtons(url: URL) -> some View {
+        HStack(spacing: 8) {
+            // Copy to clipboard
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.writeObjects([url as NSURL])
+            } label: {
+                Image(systemName: "doc.on.doc")
+                    .font(.system(size: 13))
+            }
+            .help("Copy video to clipboard")
+
+            // Save to...
+            Button {
+                let panel = NSSavePanel()
+                panel.allowedContentTypes = [.mpeg4Movie]
+                panel.nameFieldStringValue = url.lastPathComponent
+                if panel.runModal() == .OK, let dest = panel.url {
+                    try? FileManager.default.copyItem(at: url, to: dest)
+                }
+            } label: {
+                Image(systemName: "square.and.arrow.down")
+                    .font(.system(size: 13))
+            }
+            .help("Save video as...")
+
+            // Share
+            Button {
+                let picker = NSSharingServicePicker(items: [url])
+                if let view = NSApp.keyWindow?.contentView {
+                    picker.show(relativeTo: .zero, of: view, preferredEdge: .minY)
+                }
+            } label: {
+                Image(systemName: "square.and.arrow.up")
+                    .font(.system(size: 13))
+            }
+            .help("Share video")
+        }
+        .buttonStyle(.borderless)
+        .padding(6)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .padding(10)
     }
 }

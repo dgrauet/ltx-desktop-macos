@@ -1,5 +1,6 @@
 import SwiftUI
 import AVKit
+import UniformTypeIdentifiers
 
 struct HistoryView: View {
     @StateObject private var vm = HistoryViewModel()
@@ -269,11 +270,15 @@ struct VideoDetailView: View {
         VStack(alignment: .leading, spacing: 0) {
             // Player
             if let player = player {
-                VideoPlayer(player: player)
-                    .aspectRatio(16/9, contentMode: .fit)
-                    .frame(minHeight: 180, maxHeight: .infinity)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .padding([.top, .horizontal], 16)
+                ZStack(alignment: .topTrailing) {
+                    VideoPlayer(player: player)
+                        .aspectRatio(16/9, contentMode: .fit)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+
+                    videoActionButtons(url: item.fileURL)
+                }
+                .frame(minHeight: 180, maxHeight: .infinity)
+                .padding([.top, .horizontal], 16)
             } else {
                 ZStack {
                     RoundedRectangle(cornerRadius: 10)
@@ -370,5 +375,47 @@ struct VideoDetailView: View {
                 .fontWeight(.medium)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    private func videoActionButtons(url: URL) -> some View {
+        HStack(spacing: 8) {
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.writeObjects([url as NSURL])
+            } label: {
+                Image(systemName: "doc.on.doc")
+                    .font(.system(size: 13))
+            }
+            .help("Copy video to clipboard")
+
+            Button {
+                let panel = NSSavePanel()
+                panel.allowedContentTypes = [.mpeg4Movie]
+                panel.nameFieldStringValue = url.lastPathComponent
+                if panel.runModal() == .OK, let dest = panel.url {
+                    try? FileManager.default.copyItem(at: url, to: dest)
+                }
+            } label: {
+                Image(systemName: "square.and.arrow.down")
+                    .font(.system(size: 13))
+            }
+            .help("Save video as...")
+
+            Button {
+                let picker = NSSharingServicePicker(items: [url])
+                if let view = NSApp.keyWindow?.contentView {
+                    picker.show(relativeTo: .zero, of: view, preferredEdge: .minY)
+                }
+            } label: {
+                Image(systemName: "square.and.arrow.up")
+                    .font(.system(size: 13))
+            }
+            .help("Share video")
+        }
+        .buttonStyle(.borderless)
+        .padding(6)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .padding(10)
     }
 }
