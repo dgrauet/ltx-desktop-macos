@@ -28,7 +28,7 @@ _KNOWN_MODELS: list[dict[str, Any]] = [
         "model_type": "video_generator",
         "hf_repo": "dgrauet/ltx-2.3-mlx-distilled-q8",
         "check_path": _HF_CACHE / "models--dgrauet--ltx-2.3-mlx-distilled-q8",
-        "check_files": ["refs/main"],
+        "check_file": "transformer.safetensors",
     },
     {
         "id": "ltx-2.3-distilled-q4",
@@ -38,7 +38,7 @@ _KNOWN_MODELS: list[dict[str, Any]] = [
         "model_type": "video_generator",
         "hf_repo": "dgrauet/ltx-2.3-mlx-distilled-q4",
         "check_path": _HF_CACHE / "models--dgrauet--ltx-2.3-mlx-distilled-q4",
-        "check_files": ["refs/main"],
+        "check_file": "transformer.safetensors",
     },
     {
         "id": "ltx-2.3-distilled-bf16",
@@ -48,7 +48,7 @@ _KNOWN_MODELS: list[dict[str, Any]] = [
         "model_type": "video_generator",
         "hf_repo": "dgrauet/ltx-2.3-mlx-distilled",
         "check_path": _HF_CACHE / "models--dgrauet--ltx-2.3-mlx-distilled",
-        "check_files": ["refs/main"],
+        "check_file": "transformer.safetensors",
     },
     {
         "id": "gemma-3-12b-it-4bit",
@@ -57,8 +57,7 @@ _KNOWN_MODELS: list[dict[str, Any]] = [
         "size_gb": 6.0,
         "model_type": "text_encoder",
         "hf_repo": "mlx-community/gemma-3-12b-it-4bit",
-        "check_path": _HF_CACHE / "models--mlx-community--gemma-3-12b-it-4bit",
-        "check_files": ["refs/main"],
+        "check_file": "config.json",
     },
     {
         "id": "qwen3.5-2b-4bit",
@@ -67,8 +66,7 @@ _KNOWN_MODELS: list[dict[str, Any]] = [
         "size_gb": 1.2,
         "model_type": "prompt_enhancer",
         "hf_repo": "mlx-community/Qwen3.5-2B-4bit",
-        "check_path": _HF_CACHE / "models--mlx-community--Qwen3.5-2B-4bit",
-        "check_files": ["refs/main"],
+        "check_file": "config.json",
     },
     {
         "id": "ltx-2.3-spatial-upscaler",
@@ -78,8 +76,6 @@ _KNOWN_MODELS: list[dict[str, Any]] = [
         "model_type": "upscaler",
         "hf_repo": "Lightricks/LTX-2.3",
         "hf_allow_patterns": ["ltx-2.3-spatial-upscaler-x2-1.0.safetensors"],
-        "check_path": _HF_CACHE / "models--Lightricks--LTX-2.3",
-        "check_files": ["refs/main"],
     },
 ]
 
@@ -93,25 +89,28 @@ def _dir_size_gb(path: Path) -> float:
 
 
 def _is_downloaded(model_def: dict[str, Any]) -> bool:
-    """Check if a model is downloaded by verifying its cache path."""
-    check_path: Path = model_def["check_path"]
-    if not check_path.exists():
+    """Check if a model is fully downloaded by verifying key files exist in cache."""
+    try:
+        from huggingface_hub import try_to_load_from_cache
+
+        repo = model_def["hf_repo"]
+
+        # For partial downloads (upscaler), check allow_patterns files
+        allow_patterns = model_def.get("hf_allow_patterns")
+        if allow_patterns:
+            for fn in allow_patterns:
+                cached = try_to_load_from_cache(repo, fn)
+                if not cached or not isinstance(cached, str):
+                    return False
+            return True
+
+        # For full models, check the key file (e.g. transformer.safetensors)
+        check_file = model_def.get("check_file", "config.json")
+        cached = try_to_load_from_cache(repo, check_file)
+        return cached is not None and isinstance(cached, str)
+
+    except Exception:
         return False
-    for cf in model_def["check_files"]:
-        if not (check_path / cf).exists():
-            return False
-    # For partial downloads (e.g. upscaler from a larger repo), verify the
-    # actual files exist in a snapshot directory
-    allow_patterns = model_def.get("hf_allow_patterns")
-    if allow_patterns:
-        snapshots = check_path / "snapshots"
-        if not snapshots.exists():
-            return False
-        for snapshot in snapshots.iterdir():
-            if all((snapshot / fn).exists() for fn in allow_patterns):
-                return True
-        return False
-    return True
 
 
 class ModelDownloadManager:
@@ -133,7 +132,8 @@ class ModelDownloadManager:
             downloaded = _is_downloaded(m)
             actual_size = m["size_gb"]
             if downloaded:
-                disk_size = _dir_size_gb(m["check_path"])
+                cache_dir = _HF_CACHE / ("models--" + m["hf_repo"].replace("/", "--"))
+                disk_size = _dir_size_gb(cache_dir)
                 if disk_size > 0.1:
                     actual_size = round(disk_size, 2)
             result.append(
@@ -222,10 +222,21 @@ class ModelDownloadManager:
                 self._downloads[download_id]["progress"] = 0.1
 
             allow_patterns = model_def.get("hf_allow_patterns")
+            # force_download=False (default) is fine — HF Hub will skip already-cached files.
+            # The key is that snapshot_download fetches ALL files (including large safetensors).
             snapshot_download(
                 repo_id=hf_repo,
                 **({"allow_patterns": allow_patterns} if allow_patterns else {}),
             )
+
+            # Verify the download is complete (safetensors files exist in snapshot)
+            from huggingface_hub import try_to_load_from_cache
+            verify_file = allow_patterns[0] if allow_patterns else "config.json"
+            cached = try_to_load_from_cache(hf_repo, verify_file)
+            if not cached or not isinstance(cached, str):
+                raise RuntimeError(
+                    f"Download incomplete: {verify_file} not found in cache for {hf_repo}"
+                )
 
             with self._lock:
                 self._downloads[download_id]["status"] = "completed"
@@ -285,7 +296,9 @@ class ModelDownloadManager:
         if model_def is None:
             raise ValueError(f"Unknown model: {model_id}")
 
-        check_path: Path = model_def["check_path"]
+        hf_repo = model_def["hf_repo"]
+        cache_dir_name = "models--" + hf_repo.replace("/", "--")
+        check_path = _HF_CACHE / cache_dir_name
         if not check_path.exists():
             raise FileNotFoundError(f"Model not found on disk: {model_id}")
 

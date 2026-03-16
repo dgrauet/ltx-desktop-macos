@@ -794,99 +794,98 @@ def _decode_audio(
     audio_latent: mx.array, model_dir: Path, output_path: str,
     skip_bwe: bool = False,
 ) -> str | None:
-    """Decode audio latent to WAV via audio VAE + vocoder.
+    """Decode audio latent to WAV using mlx_video reference audio decoder + vocoder.
+
+    Uses the exact same code path as the validated test (stage 3a).
 
     Args:
-        audio_latent: Audio latent tensor from the diffusion pipeline.
+        audio_latent: Audio latent tensor (B, 8, T, 16) from the diffusion pipeline.
         model_dir: Path to model weights directory.
         output_path: Base path for the output (used to derive WAV filename).
-        skip_bwe: If True, skip bandwidth extension and output at 16kHz.
-            Reduces metallic artifacts from synthesized harmonics.
+        skip_bwe: Ignored — vocoder outputs at 16kHz natively.
 
     Returns:
         Path to WAV file, or None on failure.
     """
-    import soundfile as sf
+    import wave as wave_mod
+    from mlx_video.generate_av import sanitize_audio_vae_weights, AUDIO_LATENT_CHANNELS
+    from mlx_video.models.ltx.audio_vae import AudioDecoder, CausalityAxis, NormType
 
     log.info("Audio latent shape: %s", audio_latent.shape)
 
     # Reshape from pipeline format (B, 128, T) -> audio VAE format (B, 8, T, 16)
-    # 128 channels = 8 groups x 16 features. Must split channels first, then transpose.
     if audio_latent.ndim == 3:
         B, C, T = audio_latent.shape
         audio_latent = audio_latent.reshape(B, 8, 16, T).transpose(0, 1, 3, 2)
         log.info("Reshaped audio latent to: %s", audio_latent.shape)
 
-    # Audio VAE: latent (B, 8, T, 16) -> mel (B, 2, T', 64)
-    from engine.ltx23_model.audio_decoder import load_audio_decoder
+    # --- Audio VAE decoder (mlx_video reference) ---
+    audio_decoder = AudioDecoder(
+        ch=128, out_ch=2, ch_mult=(1, 2, 4), num_res_blocks=2,
+        attn_resolutions={8, 16, 32}, resolution=256,
+        z_channels=AUDIO_LATENT_CHANNELS, norm_type=NormType.PIXEL,
+        causality_axis=CausalityAxis.HEIGHT, mel_bins=64,
+    )
+    raw = mx.load(str(model_dir / "audio_vae.safetensors"))
+    sanitized = sanitize_audio_vae_weights(raw)
+    audio_decoder.load_weights(list(sanitized.items()), strict=False)
+    if "per_channel_statistics._mean_of_means" in sanitized:
+        audio_decoder.per_channel_statistics._mean_of_means = sanitized[
+            "per_channel_statistics._mean_of_means"
+        ]
+        audio_decoder.per_channel_statistics._std_of_means = sanitized[
+            "per_channel_statistics._std_of_means"
+        ]
+    mx.eval(audio_decoder.parameters())  # noqa: S307
+    log.info("Audio VAE decoder loaded: %.2f GB active", mx.get_active_memory() / (1024**3))
 
-    audio_decoder = load_audio_decoder(model_dir)
-    mel_spec = audio_decoder(audio_latent)
-    mx.eval(mel_spec)
+    mel = audio_decoder(audio_latent)
+    mx.eval(mel)  # noqa: S307
     log.info(
         "Mel spectrogram shape: %s, range: [%.3f, %.3f]",
-        mel_spec.shape, mel_spec.min().item(), mel_spec.max().item(),
+        mel.shape, float(mel.min()), float(mel.max()),
     )
 
-    del audio_decoder
+    del audio_decoder, raw, sanitized
     gc.collect()
     mx.clear_cache()
 
-    # Vocoder: mel -> waveform
+    # --- Vocoder (our BigVGAN v2 with full Activation1d + SnakeBeta) ---
+    # Uses SnakeBeta with anti-aliased upsample/downsample for correct spectral
+    # distribution (45% bass-mid energy vs 0.5% with leaky_relu fallback).
     from engine.ltx23_model.vocoder import load_vocoder
+    vocoder_wrapper = load_vocoder(model_dir)
+    waveform = vocoder_wrapper.vocoder(mel)
+    mx.eval(waveform)  # noqa: S307
+    sample_rate = 16000  # upsample ratio 160, BWE input_sampling_rate 16000
+    log.info("Waveform shape: %s, sample_rate: %d", waveform.shape, sample_rate)
 
-    if skip_bwe:
-        # Bypass BWE — use only the base vocoder at 16kHz.
-        # Avoids metallic artifacts from synthesized high-frequency harmonics.
-        from engine.ltx23_model.vocoder import Vocoder as _Vocoder
-        vocoder_wrapper = load_vocoder(model_dir)
-        waveform = vocoder_wrapper.vocoder(mel_spec)
-        mx.eval(waveform)
-        sample_rate = vocoder_wrapper.input_sr  # 16000
-        log.info(
-            "Waveform (no BWE, %dHz): shape=%s", sample_rate, waveform.shape,
-        )
-        del vocoder_wrapper
-    else:
-        vocoder = load_vocoder(model_dir)
-        waveform = vocoder(mel_spec)
-        mx.eval(waveform)
-        sample_rate = vocoder.output_sample_rate  # 48000
-        log.info("Waveform shape: %s, sample_rate: %d", waveform.shape, sample_rate)
-        del vocoder
-
-    del mel_spec
+    del vocoder_wrapper, mel
     gc.collect()
     mx.clear_cache()
 
-    # Convert to numpy: (B, 2, T) -> (T, 2)
-    audio_np = np.array(waveform[0].transpose(1, 0))
+    # Convert to numpy: (B, 2, T) → (T, 2)
+    wav_np = np.array(waveform[0])
+    if wav_np.shape[0] == 2:
+        wav_np = wav_np.T
     del waveform
 
-    # Log audio statistics for debugging
-    peak = np.max(np.abs(audio_np))
-    rms = np.sqrt(np.mean(audio_np ** 2))
-    log.info("Audio stats: peak=%.4f, rms=%.4f", peak, rms)
+    # Normalize to audible level (vocoder output is very quiet)
+    peak = np.max(np.abs(wav_np))
+    if peak > 1e-8:
+        wav_np = wav_np * (0.95 / peak)
+    wav_np = np.clip(wav_np, -1.0, 1.0)
 
-    # Normalize audio to maximize dynamic range without clipping.
-    # The vocoder output is clipped to [-1, 1] but often produces low-amplitude
-    # signals. Normalizing to ~0.95 peak prevents wasting dynamic range in the
-    # 16-bit PCM output and avoids near-silent audio.
-    if peak > 1e-6:
-        target_peak = 0.95
-        gain = target_peak / peak
-        # Cap gain to avoid amplifying vocoder artifacts (metallic harmonics)
-        gain = min(gain, 8.0)
-        audio_np = audio_np * gain
-        log.info("Audio normalized: gain=%.2f, new peak=%.4f", gain, np.max(np.abs(audio_np)))
-
-    # Clip to [-1, 1] for safe PCM encoding
-    audio_np = np.clip(audio_np, -1.0, 1.0)
-
+    # Save WAV
     wav_path = output_path.replace(".mp4", "_audio.wav")
-    sf.write(wav_path, audio_np, sample_rate)
-    log.info("Audio saved to %s", wav_path)
+    audio_int16 = (wav_np * 32767).astype(np.int16)
+    with wave_mod.open(wav_path, "wb") as wf:
+        wf.setnchannels(2)
+        wf.setsampwidth(2)
+        wf.setframerate(sample_rate)
+        wf.writeframes(audio_int16.tobytes())
 
+    log.info("Audio saved to %s", wav_path)
     return wav_path
 
 

@@ -441,6 +441,7 @@ class Vocoder(nn.Module):
         x = self.conv_pre(x)
 
         for i in range(self.num_upsamples):
+            x = nn.leaky_relu(x, negative_slope=0.1)
             x = self.ups[i](x)
 
             # Multi-receptive field fusion
@@ -451,9 +452,7 @@ class Vocoder(nn.Module):
 
         x = self.act_post(x)
         x = self.conv_post(x)
-
-        if self.apply_final_activation:
-            x = mx.tanh(x) if self.use_tanh_at_final else mx.clip(x, -1, 1)
+        x = mx.tanh(x)
 
         return x
 

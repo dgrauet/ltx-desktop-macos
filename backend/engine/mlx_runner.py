@@ -24,8 +24,6 @@ DEFAULT_MODEL_REPO = "dgrauet/ltx-2.3-mlx-distilled-q8"
 # HuggingFace cache root
 _HF_CACHE = Path.home() / ".cache" / "huggingface" / "hub"
 
-# Legacy local path (from earlier local_dir downloads — checked as fallback)
-_LEGACY_LOCAL_PATH = _HF_CACHE / "ltx23-mlx"
 
 # Regex patterns for stderr progress lines
 _STAGE_RE = re.compile(r"^STAGE:(\d+):STEP:(\d+):(\d+)")
@@ -70,13 +68,6 @@ def get_model_repo(repo_id: str | None = None) -> tuple[str, bool]:
         quantized = _is_quantized_model(Path(model_path))
         log.info("Using HF model: %s (%s)", target_repo, model_path)
         return model_path, quantized
-
-    # Fallback: legacy local path (only for default repo)
-    if target_repo == DEFAULT_MODEL_REPO:
-        if _LEGACY_LOCAL_PATH.exists() and (_LEGACY_LOCAL_PATH / "transformer.safetensors").exists():
-            quantized = _is_quantized_model(_LEGACY_LOCAL_PATH)
-            log.info("Using legacy local model: %s", _LEGACY_LOCAL_PATH)
-            return str(_LEGACY_LOCAL_PATH), quantized
 
     # Last resort: return repo ID (generation will fail if not downloadable)
     log.warning("Could not resolve model %s — returning repo ID", target_repo)
@@ -233,11 +224,14 @@ async def _run_text_encoding_subprocess(
         cmd.extend(["--text-encoder-repo", text_encoder_repo])
 
     log.info("Running text encoding subprocess...")
+    te_env = os.environ.copy()
+    te_env["PYTHONDONTWRITEBYTECODE"] = "1"
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         cwd=backend_dir,
+        env=te_env,
     )
 
     _, stderr_data = await proc.communicate()
@@ -400,10 +394,10 @@ async def run_mlx_generation(
     log.info("Starting MLX generation: %s", " ".join(cmd[:6]) + " ...")
     log.debug("Full command: %s", cmd)
 
-    # Set up environment with precomputed embeddings path
-    env = None
+    # Set up environment — disable bytecode cache to avoid stale .pyc issues
+    env = os.environ.copy()
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
     if embeddings_path:
-        env = os.environ.copy()
         env["LTX_PRECOMPUTED_EMBEDDINGS"] = embeddings_path
 
     proc = await asyncio.create_subprocess_exec(
