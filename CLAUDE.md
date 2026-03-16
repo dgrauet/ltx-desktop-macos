@@ -10,11 +10,11 @@ Native macOS app replicating **LTX Desktop** (Lightricks) with **100% local infe
 
 ### LTX-2.3 — The Model
 - **Architecture**: Diffusion Transformer (DiT) 19B params, synchronized audio+video in single pass
-- **Capabilities**: T2V, I2V, V2V, A2V, keyframe interpolation, retake, extend
-- **Resolutions**: up to 1920×1080 / 1080×1920 native, 16:9, 9:16
-- **FPS**: 24-30 (up to 50 full model)
-- **Audio**: built-in vocoder, synchronized generation
-- **Variants**: `ltx-2.3-dev` (full bf16 ~42GB), `ltx-2.3-distilled` (8+4 steps), distilled-fp8
+- **Model capabilities**: T2V, I2V, V2V, A2V, keyframe interpolation, retake, extend (app only implements T2V + I2V so far)
+- **Tested resolutions**: up to 1280×704 on 32GB. 1920×1080 selectable in UI but untested on 32GB (likely OOMs)
+- **FPS**: 24 (distilled model)
+- **Audio**: built-in vocoder, synchronized generation (output noisy — quality issue)
+- **Variants**: `ltx-2.3-dev` (full bf16 ~42GB), `ltx-2.3-distilled` (8+4 steps), distilled-fp8. Only distilled supported by mlx-video-with-audio.
 - **Text encoder**: Gemma 3 12B (for video generation, NOT prompt enhancement)
 - **VAE**: rebuilt for 2.3, better texture preservation
 - **HuggingFace**: `Lightricks/LTX-2.3`, pre-converted MLX: `dgrauet/ltx-2.3-mlx-distilled-q8`
@@ -53,28 +53,30 @@ FastAPI in separate process for: crash isolation (OOM kills backend, not UI), GI
 - ✅ Rapid Preview (384×256, 4 steps, seconds)
 - ✅ I2V with reference image (drag & drop), image_strength param
 - ✅ Prompt Enhancement (Qwen3.5-2B, lazy load/unload)
-- ✅ Model management (auto download, distilled/full choice, cache in `~/.cache/huggingface/`)
-- ✅ Audio decode pipeline (VAE → vocoder → WAV → mux MP4)
-- ✅ Export MP4 via ffmpeg
-- ✅ 2× pixel upscale via ffmpeg lanczos (latent-space upscale OOMs on 32GB at VAE decode)
+- ✅ Model management (auto download, variant selection, delete, cache in `~/.cache/huggingface/`)
+- ✅ Model download UI in Settings (download/delete/progress tracking)
+- ✅ Audio decode pipeline (VAE → vocoder → WAV → mux MP4) — `--generate-audio` for v2.3
+- ✅ Export MP4 via ffmpeg (H.264/H.265/ProRes, CRF 18)
+- ✅ FCPXML export for Final Cut Pro / DaVinci Resolve
+- ✅ 2× pixel upscale via ffmpeg lanczos
 - ✅ Marathon stability test PASS (10 gens, 97f@768×512, no OOM, stable timing)
-- ✅ Audio generation (VAE → vocoder → WAV → mux MP4) — `--generate-audio` for v2.3
 - ✅ Generation UX stage labels (Loading model / Generating / Decoding / Saving via WebSocket)
+- ✅ Progressive diffusion display (preview frame every 2 steps via WebSocket)
+- ✅ History view with JSON persistence (GET/DELETE endpoints)
+- ✅ Memory warning thresholds in Settings UI (cache, peak, available)
 
 **REMAINING:**
-- Audio quality — pipeline works (WAV → mux) but audio may sound noisy; investigate vocoder output quality
-- Marathon test memory reporting — `mx.get_active_memory()` returns 0 in parent process; capture from subprocesses
-- Generation performance (~8min for 97f@768×512) — TeaCache: 0% hit rate with 8-step distilled model (DISABLED); mx.compile: tracing overhead wasted in subprocess-per-gen arch (DISABLED). Next: persistent model server architecture to enable both, or kernel warm-up
-- Progressive diffusion display (intermediate frames via WebSocket every N steps)
-- Video retake (regenerate time segment) & extension (forward/backward)
-- LoRA support (camera control, detail enhancement, custom .safetensors) — LoRAs must be 2.3-compatible
-- Local TTS voiceover via MLX-Audio (Kokoro, Dia, CSM) — currently stub
-- Background music generation (genre presets)
-- History view connected to real backend data
-- Model download UI in Settings
-- Batch generation queue with priority management
+- Audio quality — pipeline works but vocoder output noisy; needs investigation
+- Generation performance (~8min for 97f@768×512) — TeaCache/mx.compile both disabled (see Performance section)
+- Video retake & extend — endpoints exist but produce stub output (solid-color clips with sleep), need real inference
+- LoRA support — endpoint infrastructure exists but untested end-to-end with real LoRA weights
+- Local TTS voiceover via MLX-Audio (Kokoro, Dia, CSM) — currently sine-wave stub
+- Background music generation — currently sine-wave stub
+- Batch generation queue — queue logic exists, UI not connected
 - Parameter preset saving/loading
-- FCPXML export for Final Cut Pro / Premiere Pro / DaVinci Resolve
+- Hardware enforcement — limit resolution/frames based on detected RAM (currently all resolutions selectable)
+- RAM < 32GB warning banner
+- Automated memory actions (pause queue, unload model on pressure) — currently warnings only
 
 ### Phase 2 — Advanced Workflows (if product finds traction)
 - Simple timeline (2 video + 5 audio tracks, trim/split/reorder)
@@ -88,18 +90,32 @@ FastAPI in separate process for: crash isolation (OOM kills backend, not UI), GI
 
 ## Backend API Endpoints
 
+### Working (real inference / real logic)
 ```
 POST /api/v1/generate/text-to-video     POST /api/v1/generate/image-to-video
-POST /api/v1/generate/preview            POST /api/v1/generate/retake
-POST /api/v1/generate/extend             GET  /api/v1/queue
-POST /api/v1/queue/{job_id}/cancel       WS   /ws/progress/{job_id}
+POST /api/v1/generate/preview            WS   /ws/progress/{job_id}
+GET  /api/v1/queue                       GET  /api/v1/queue/{job_id}
+POST /api/v1/queue/{job_id}/cancel       POST /api/v1/queue/{job_id}/priority
 GET  /api/v1/models                      POST /api/v1/models/download
-GET  /api/v1/loras                       POST /api/v1/loras/load
+POST /api/v1/models/select               GET  /api/v1/models/{download_id}/status
+DELETE /api/v1/models/{model_id}         POST /api/v1/prompt/enhance
+POST /api/v1/export/video                POST /api/v1/export/fcpxml
+POST /api/v1/audio/mix                   GET  /api/v1/system/health
+GET  /api/v1/system/memory               GET  /api/v1/history
+DELETE /api/v1/history/{job_id}
+```
+
+### Stubs (API exists, fake inference / placeholder output)
+```
+POST /api/v1/generate/retake             POST /api/v1/generate/extend
 POST /api/v1/audio/tts                   POST /api/v1/audio/music
-POST /api/v1/audio/mix                   POST /api/v1/export/video
-POST /api/v1/export/fcpxml               POST /api/v1/export/premiere-xml
-GET  /api/v1/system/info                 GET  /api/v1/system/health
-GET  /api/v1/system/memory               POST /api/v1/prompt/enhance
+```
+
+### Untested (code exists, no end-to-end verification with real LoRAs)
+```
+GET  /api/v1/loras                       POST /api/v1/loras/load
+POST /api/v1/loras/unload/{lora_id}      PUT  /api/v1/loras/{lora_id}/strength
+POST /api/v1/loras/import
 ```
 
 ---
@@ -111,46 +127,35 @@ GET  /api/v1/system/memory               POST /api/v1/prompt/enhance
 ### Rules (mandatory)
 1. Call `aggressive_cleanup()` (gc.collect + mx.clear_cache + mx.eval barrier) between **every** pipeline stage
 2. **Stream VAE decode** frame-by-frame to ffmpeg pipe — never decode all frames in RAM
-3. **Periodic model reload** every 5 generations to reclaim fragmented Metal buffers
+3. **Periodic model reload** every 5 generations (auto-triggered via generation counter in memory_manager.py)
 4. **Monitor** via `/api/v1/system/memory`: active, cache, peak memory + system available
-5. See `engine/memory_manager.py` and `engine/streaming_vae.py` for implementation
+5. See `engine/memory_manager.py` and `engine/ltx23_model/vae_decoder.py` (streaming decode) for implementation
 
-### Warning thresholds (show in UI)
-| Condition | Severity | Action |
-|-----------|----------|--------|
-| cache > 2× active | Warning | Force clear_cache() |
-| peak > 85% total RAM | Critical | Reduce resolution or model reload |
-| active grows between jobs | Warning | Trigger model reload |
-| system available < 4GB | Critical | Pause queue, unload model, alert |
+### Warning thresholds
+UI indicators in Settings (passive warnings only — no automated actions yet):
+| Condition | Severity | UI indicator |
+|-----------|----------|--------------|
+| cache > 2× active | Warning | Yellow |
+| peak > 85% total RAM | Critical | Red |
+| system available < 4GB | Critical | Red |
+
+**Not implemented:** automated pause queue, auto-unload model, proactive alerts. Warnings are display-only.
 
 ### Marathon Test (stability gate)
 10 consecutive T2V at 97 frames 768×512. Pass: no OOM, memory gen10 within 20% of gen1, no gen >2× slower than gen1.
 
 ---
 
-## Performance Optimizations (up to 3× combined)
+## Performance Optimizations
 
-### 1. Kernel Warm-Up (~20-30% first gen)
-Run micro-generation at startup to force Metal kernel compilation. Show "Preparing engine..." splash. See `warmup_pipeline()`.
+### Current Status — ALL DISABLED
+With the subprocess-per-generation architecture, none of these optimizations are active:
+- **TeaCache** — implemented (`engine/teacache.py`) but 0% cache hit rate with 8-step distilled model. Large sigma jumps between steps cause features to change too much. Designed for 20-50 step models.
+- **mx.compile()** — tracing overhead (~2min) paid every subprocess invocation, compiled kernels lost on exit. Net negative.
+- **Kernel warm-up** — not implemented. Would help first gen but requires persistent model server.
+- **Latent buffer reuse** — not implemented.
 
-### 2. Compiled Denoising via `mx.compile()` (~10-15%)
-Compile model forward pass to fuse element-wise ops into fewer Metal kernels. Compile the forward pass, not the loop.
-
-### 3. Latent Buffer Reuse (~5-10%)
-Pre-allocate noise buffer at max shape, reuse across generations. Reduces Metal fragmentation.
-
-### 4. TeaCache — Block-Level Output Caching (~1.5-2×)
-Cache entire transformer block outputs between consecutive timesteps when output change is below threshold. **Not** KV-caching (which does NOT work for diffusion — latent changes every step).
-- `rel_l1_thresh=0.03` for production, `0.05` for preview
-- See `engine/teacache.py` for MLX implementation
-
-### Combined Pipeline Flow
-```
-app_start → load models → mx.compile() → LatentPool → TeaCache → warmup → cleanup → ready
-job: enhance prompt → cleanup → encode text → cleanup → Stage 1 diffusion → cleanup
-   → Stage 2 upscale → cleanup → streaming VAE decode → cleanup → audio decode → cleanup
-   → ffmpeg mux → cleanup → [every 5 jobs: full model reload + re-compile + re-warmup]
-```
+To enable these: would need persistent model server (keep model loaded across gens). Dropped — incompatible with 32GB unload/reload pattern.
 
 ### What Does NOT Help (avoid)
 - KV-caching across diffusion steps (latent changes every step → invalid K/V)
@@ -163,11 +168,11 @@ job: enhance prompt → cleanup → encode text → cleanup → Stage 1 diffusio
 
 ## Hardware
 
-- **Minimum**: 32GB RAM. Below that, very limited (low res, few frames, recommend cloud text encoding fallback)
+- **Minimum**: 32GB RAM. Below that, very limited (low res, few frames)
 - **Model weights**: ~21GB int8 (dominant cost, 85% of memory). Latents only ~300MB.
 - **Budget (32GB)**: OS ~4GB + model ~21GB + buffers ~3GB + Metal cache ~2-4GB + enhancer ~1.2GB (when active)
-- Auto-detect chip/RAM on launch, limit resolution/frames accordingly
-- Show warning banner if RAM < 32GB
+- Backend detects chip/RAM via `/api/v1/system/info` but **no enforcement** — all resolutions remain selectable regardless of RAM
+- **Not implemented:** RAM < 32GB warning banner, auto-limit resolution/frames based on hardware
 
 ---
 
@@ -179,8 +184,8 @@ Stage 1: low-res generation (768×512) with distilled model (8 steps) → Stage 
 ### Rapid Preview
 384×256, 4 steps, single-stage. Seconds. User validates → launches full render.
 
-### Progressive Diffusion Display (TODO)
-Every Nth step, partial VAE decode → JPEG → WebSocket to frontend. ~200ms per decode.
+### Progressive Diffusion Display
+Every 2 steps, decode middle temporal frame → JPEG → temp file → base64 → WebSocket. ~800ms total overhead per 8-step gen. Enabled for T2V/I2V, disabled for rapid preview.
 
 ### Two-Subprocess Architecture
 Subprocess A: Gemma 3 12B 4-bit text encoding (~8.7GB peak) → exits, frees GPU. Subprocess B: transformer + VAE generation (~12.6GB peak). Embeddings passed via npz file. See `engine/mlx_runner.py`.
@@ -217,7 +222,6 @@ Example:
 
 - **LTX-2.3**: [Blog](https://ltx.io/model/model-blog/ltx-2-3-release) · [GitHub](https://github.com/Lightricks/LTX-2) · [HuggingFace](https://huggingface.co/Lightricks/LTX-2.3) · [Prompting](https://ltx.video/blog/how-to-prompt-for-ltx-2)
 - **MLX**: [GitHub](https://github.com/ml-explore/mlx) · [Docs](https://ml-explore.github.io/mlx/) · [mlx-lm](https://github.com/ml-explore/mlx-lm) · [mlx-audio](https://github.com/Blaizzy/mlx-audio)
-- **TeaCache**: [LTX-specific](https://github.com/ali-vilab/TeaCache/tree/main/TeaCache4LTX-Video) · [Paper](https://liewfeng.github.io/TeaCache/)
 - **Models**: [MLX LTX-2.3](https://huggingface.co/dgrauet/ltx-2.3-mlx-distilled-q8) · [Qwen3.5](https://huggingface.co/Qwen/Qwen3.5-2B)
 - **LTX Desktop (reference)**: [GitHub](https://github.com/Lightricks/ltx-desktop)
 
@@ -225,14 +229,11 @@ Example:
 
 ## Important Reminders
 
-1. **Metal memory fragmentation is the #1 risk** — aggressive_cleanup() at every stage, streaming VAE, periodic model reload, marathon test before stable
-2. **LTX-2.3 model is ~42GB** — long initial download, significant storage
-3. **LTX-2.0 LoRAs incompatible with 2.3** — different latent space, must retrain
-4. **mlx-video-with-audio only supports distilled variant** — full dev model support WIP
-5. **Always lazy-load prompt enhancer** — never alongside video model on <64GB
-6. **VAE decode must stream to ffmpeg** — never all frames in RAM (peak OOM trigger)
-7. **ffmpeg required** — `brew install ffmpeg` or bundle static binary
-8. **macOS 14 Sonoma minimum** — macOS 15+ recommended for Metal optimizations
-9. **No timeline for MVP** — export FCPXML instead. Timeline only if user demand proves it
-10. **Rapid preview is must-have** — minutes for full gen, seconds for preview changes UX fundamentally
-11. **DiT has global temporal attention** — cannot window diffusion loop or use LLM-style KV-caching. Use ExtendPipeline for longer videos, TeaCache for speed.
+1. **Metal memory fragmentation is the #1 risk** — aggressive_cleanup() at every stage, streaming VAE, periodic model reload
+2. **Always lazy-load prompt enhancer** — never alongside video model on <64GB
+3. **VAE decode must stream to ffmpeg** — never all frames in RAM (peak OOM trigger)
+4. **ffmpeg required** — `brew install ffmpeg` or bundle static binary
+5. **Only distilled variant supported** — mlx-video-with-audio doesn't support full dev model
+6. **LTX-2.0 LoRAs incompatible with 2.3** — different latent space, must retrain
+7. **DiT has global temporal attention** — cannot window diffusion loop or use LLM-style KV-caching
+8. **1920×1080 untested on 32GB** — max verified resolution is 1280×704
