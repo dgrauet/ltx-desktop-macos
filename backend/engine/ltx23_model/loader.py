@@ -79,10 +79,16 @@ def _apply_quantization(model: LTXModel, quant_config: dict) -> None:
     group_size = quant_config.get("group_size", 64)
     only_blocks = quant_config.get("only_transformer_blocks", True)
 
+    exclude_audio = quant_config.get("exclude_audio", False)
+
     if only_blocks:
         # Only quantize nn.Linear modules within transformer_blocks
         def class_predicate(path: str, module: nn.Module) -> bool:
-            return isinstance(module, nn.Linear) and "transformer_blocks" in path
+            if not isinstance(module, nn.Linear) or "transformer_blocks" not in path:
+                return False
+            if exclude_audio and "audio" in path:
+                return False
+            return True
 
         nn.quantize(model, bits=bits, group_size=group_size, class_predicate=class_predicate)
     else:

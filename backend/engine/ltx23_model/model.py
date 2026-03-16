@@ -8,12 +8,15 @@ Key naming differences from upstream:
 - ff.proj_in/proj_out (ours) vs ff.project_in.proj/project_out (upstream) in FeedForward
 """
 
+import logging
 from dataclasses import dataclass
 from enum import Enum
 from typing import List, Optional, Tuple, Union
 
 import mlx.core as mx
 import mlx.nn as nn
+
+log = logging.getLogger(__name__)
 
 from .rope import LTXRopeType, precompute_freqs_cis
 from .timestep_embedding import AdaLayerNormSingle
@@ -575,7 +578,7 @@ class LTXModel(nn.Module):
 
         # Run all blocks normally
         # mx.eval is mlx.core.eval — tensor materialization, NOT Python eval()
-        materialize = mx.eval  # noqa: S307
+        materialize = mx.eval  # noqa: S307  — mx.eval materializes MLX tensors, not Python eval
         for i, block in enumerate(self.transformer_blocks):
             video_args, audio_args = block(video_args, audio_args)
 

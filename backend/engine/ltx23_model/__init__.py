@@ -34,7 +34,7 @@ from .connector import Embeddings1DConnector, BasicTransformerBlock1D
 from .vae_decoder import VideoDecoder, load_vae_decoder, decode_video, streaming_decode_to_ffmpeg
 from .vae_encoder import VideoEncoder, load_vae_encoder, encode_image
 from .audio_decoder import AudioDecoder, load_audio_decoder
-from .vocoder import Vocoder, VocoderWithBWE, load_vocoder
+from .vocoder import Vocoder, load_vocoder
 
 __all__ = [
     "LTXModel",
@@ -65,6 +65,5 @@ __all__ = [
     "AudioDecoder",
     "load_audio_decoder",
     "Vocoder",
-    "VocoderWithBWE",
     "load_vocoder",
 ]

@@ -390,7 +390,6 @@ async def run_mlx_generation(
         cmd.append("--no-bwe")
         log.info("BWE disabled — audio output at 16kHz (less metallic)")
 
-
     log.info("Starting MLX generation: %s", " ".join(cmd[:6]) + " ...")
     log.debug("Full command: %s", cmd)
 

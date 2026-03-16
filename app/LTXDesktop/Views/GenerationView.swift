@@ -112,11 +112,12 @@ struct GenerationView: View {
                         .font(.subheadline)
                     Spacer()
                     Picker("", selection: $vm.numFrames) {
-                        ForEach([9, 25, 49, 97], id: \.self) { n in
-                            Text("\(n)").tag(n)
+                        ForEach([9, 25, 49, 97, 161, 257], id: \.self) { n in
+                            let secs = String(format: "%.1fs", Double(n) / Double(vm.fps))
+                            Text("\(n) (\(secs))").tag(n)
                         }
                     }
-                    .frame(width: 80)
+                    .frame(width: 130)
                 }
 
                 // FPS
