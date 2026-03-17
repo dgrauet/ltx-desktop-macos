@@ -8,6 +8,11 @@ struct GenerationView: View {
     @AppStorage("promptEnhanceEnabled") private var enhanceEnabled: Bool = true
     @State private var player: AVPlayer?
     @State private var showQueuePopover = false
+    @State private var showRetakeSheet = false
+    @State private var showExtendSheet = false
+    @StateObject private var audioVM = AudioViewModel()
+    @State private var showSavePresetAlert = false
+    @State private var newPresetName = ""
 
     var body: some View {
         HSplitView {
@@ -28,6 +33,25 @@ struct GenerationView: View {
                 player = nil
             }
         }
+        .task {
+            await vm.fetchHardwareLimits(service: backendService)
+            await vm.loadPresets(service: backendService)
+            await vm.fetchLoRAs(service: backendService)
+        }
+        .alert("Save Preset", isPresented: $showSavePresetAlert) {
+            TextField("Preset name", text: $newPresetName)
+            Button("Save") {
+                let name = newPresetName.trimmingCharacters(in: .whitespaces)
+                guard !name.isEmpty else { return }
+                Task {
+                    await vm.saveCurrentAsPreset(name: name, using: backendService)
+                    newPresetName = ""
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                newPresetName = ""
+            }
+        }
     }
 
     // MARK: - Controls Panel
@@ -35,6 +59,14 @@ struct GenerationView: View {
     private var controlsPanel: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
+                // Low RAM warning banner
+                if vm.isLowRAM {
+                    lowRAMBanner
+                }
+
+                // Preset bar
+                presetBar
+
                 // Image drop zone for I2V
                 imageDropZone
 
@@ -106,11 +138,10 @@ struct GenerationView: View {
                     .frame(width: 160)
                 }
 
-                // Frames
+                // Frames + FPS
                 HStack {
                     Text("Frames")
                         .font(.subheadline)
-                    Spacer()
                     Picker("", selection: $vm.numFrames) {
                         ForEach([9, 25, 49, 97, 161, 257], id: \.self) { n in
                             let secs = String(format: "%.1fs", Double(n) / Double(vm.fps))
@@ -118,38 +149,47 @@ struct GenerationView: View {
                         }
                     }
                     .frame(width: 130)
-                }
 
-                // FPS
-                HStack {
+                    Spacer()
+
                     Text("FPS")
                         .font(.subheadline)
-                    Spacer()
                     Picker("", selection: $vm.fps) {
                         Text("24").tag(24)
                         Text("30").tag(30)
                     }
-                    .frame(width: 80)
+                    .frame(width: 70)
                 }
 
-                // Steps
+                // Hardware warning for resolution/frames
+                if let warning = vm.resolutionWarning {
+                    HStack(spacing: 4) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                            .font(.caption)
+                        Text(warning)
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.horizontal, 4)
+                }
+
+                // Steps + Seed
                 HStack {
                     Text("Steps")
                         .font(.subheadline)
-                    Spacer()
                     Stepper(value: $vm.steps, in: 1...50) {
                         Text("\(vm.steps)")
                             .monospacedDigit()
                     }
-                }
 
-                // Seed
-                HStack {
+                    Spacer()
+
                     Text("Seed")
                         .font(.subheadline)
-                    Spacer()
                     TextField("Seed", value: $vm.seed, format: .number)
-                        .frame(width: 100)
+                        .frame(width: 80)
                         .textFieldStyle(.roundedBorder)
                 }
 
@@ -197,8 +237,20 @@ struct GenerationView: View {
                         }
                     }
 
-                    // Warning: Full HD on 32GB
-                    if vm.selectedResolution.isFullHD {
+                    // Warning: Full HD on insufficient RAM (only show if hardware limits confirm it)
+                    if vm.selectedResolution.isFullHD,
+                       let limits = vm.hardwareLimits,
+                       limits.totalRamGb < 64 {
+                        HStack(spacing: 4) {
+                            Image(systemName: "memorychip")
+                                .foregroundStyle(.red)
+                                .font(.caption)
+                            Text("Full HD requires 64GB+ RAM (you have \(limits.totalRamGb)GB)")
+                                .font(.caption2)
+                                .foregroundStyle(.red)
+                        }
+                    } else if vm.selectedResolution.isFullHD, vm.hardwareLimits == nil {
+                        // Fallback when limits not yet loaded
                         HStack(spacing: 4) {
                             Image(systemName: "memorychip")
                                 .foregroundStyle(.red)
@@ -209,6 +261,9 @@ struct GenerationView: View {
                         }
                     }
                 }
+
+                // LoRA selection
+                loraSection
 
                 Divider()
 
@@ -317,6 +372,12 @@ struct GenerationView: View {
                     Text(error)
                         .foregroundStyle(.red)
                         .font(.caption)
+                }
+
+                // Audio panel (shown after video generation completes)
+                if let url = vm.outputVideoURL {
+                    Divider()
+                    AudioPanelView(vm: audioVM, videoPath: url.path)
                 }
 
                 Spacer()
@@ -513,6 +574,142 @@ struct GenerationView: View {
         }
     }
 
+    // MARK: - Preset Bar
+
+    private var presetBar: some View {
+        HStack(spacing: 8) {
+            Picker("Preset", selection: Binding(
+                get: { vm.selectedPresetId ?? "" },
+                set: { newValue in
+                    if newValue.isEmpty {
+                        vm.selectedPresetId = nil
+                    } else if let preset = vm.presets.first(where: { $0.id == newValue }) {
+                        vm.applyPreset(preset)
+                    }
+                }
+            )) {
+                Text("Custom").tag("")
+                ForEach(vm.presets) { preset in
+                    HStack {
+                        Text(preset.name)
+                        if preset.builtin {
+                            Text("(built-in)")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .tag(preset.id)
+                }
+            }
+            .labelsHidden()
+
+            Button(action: {
+                showSavePresetAlert = true
+            }) {
+                Image(systemName: "star")
+                    .font(.system(size: 13))
+            }
+            .buttonStyle(.borderless)
+            .help("Save current settings as preset")
+
+            if let selectedId = vm.selectedPresetId,
+               let preset = vm.presets.first(where: { $0.id == selectedId }),
+               !preset.builtin {
+                Button(action: {
+                    Task { await vm.deletePreset(selectedId, using: backendService) }
+                }) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.red)
+                }
+                .buttonStyle(.borderless)
+                .help("Delete this preset")
+            }
+        }
+    }
+
+    // MARK: - Low RAM Banner
+
+    private var lowRAMBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.white)
+                .font(.subheadline)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Insufficient RAM")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.white)
+                if let limits = vm.hardwareLimits {
+                    Text("\(limits.totalRamGb)GB detected — 32GB minimum recommended. Very limited capability.")
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.9))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer()
+        }
+        .padding(10)
+        .background(Color.red.opacity(0.85))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    // MARK: - LoRA Section
+
+    @State private var loraExpanded: Bool = false
+
+    private var loraSection: some View {
+        DisclosureGroup(isExpanded: $loraExpanded) {
+            if vm.availableLoRAs.isEmpty {
+                HStack(spacing: 6) {
+                    Image(systemName: "info.circle")
+                        .foregroundStyle(.secondary)
+                        .font(.caption)
+                    Text("Manage LoRAs in Settings")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 4)
+            } else {
+                VStack(spacing: 6) {
+                    ForEach(vm.availableLoRAs) { lora in
+                        HStack(spacing: 8) {
+                            Toggle(isOn: Binding<Bool>(
+                                get: { vm.selectedLoRAIds.contains(lora.id) },
+                                set: { _ in vm.toggleLoRASelection(lora.id) }
+                            )) {
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(lora.name)
+                                        .font(.caption)
+                                        .lineLimit(1)
+                                    Text(String(format: "%.0f%%", lora.strength * 100))
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .toggleStyle(.checkbox)
+                        }
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text("LoRA")
+                    .font(.subheadline)
+                if !vm.selectedLoRAIds.isEmpty {
+                    Text("\(vm.selectedLoRAIds.count)")
+                        .font(.caption2)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Color.accentColor)
+                        .clipShape(Capsule())
+                }
+            }
+        }
+    }
+
     // MARK: - Image Drop Zone
 
     private var imageDropZone: some View {
@@ -592,12 +789,66 @@ struct GenerationView: View {
     private var previewPanel: some View {
         Group {
             if let player = player {
-                ZStack(alignment: .topTrailing) {
+                ZStack {
                     VideoPlayer(player: player)
                         .clipShape(RoundedRectangle(cornerRadius: 12))
 
+                    // Top-right: copy/save/share
+                    VStack {
+                        HStack {
+                            Spacer()
+                            if let url = vm.outputVideoURL {
+                                videoActionButtons(url: url)
+                            }
+                        }
+                        Spacer()
+                        // Retake/extend buttons above the video player controls
+                        if vm.outputVideoURL != nil {
+                            HStack(spacing: 10) {
+                                Button(action: { showRetakeSheet = true }) {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "arrow.triangle.2.circlepath")
+                                        Text("Retake")
+                                    }
+                                    .font(.caption)
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+
+                                Button(action: { showExtendSheet = true }) {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "arrow.right.to.line")
+                                        Text("Extend")
+                                    }
+                                    .font(.caption)
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                            }
+                            .padding(8)
+                            .background(.ultraThinMaterial)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                            .padding(.bottom, 52)
+                        }
+                    }
+                }
+                .sheet(isPresented: $showRetakeSheet) {
                     if let url = vm.outputVideoURL {
-                        videoActionButtons(url: url)
+                        RetakeSheet(
+                            sourceVideoPath: url.path,
+                            videoDuration: Double(vm.numFrames) / Double(vm.fps),
+                            fps: vm.fps
+                        )
+                        .environmentObject(backendService)
+                    }
+                }
+                .sheet(isPresented: $showExtendSheet) {
+                    if let url = vm.outputVideoURL {
+                        ExtendSheet(
+                            sourceVideoPath: url.path,
+                            fps: vm.fps
+                        )
+                        .environmentObject(backendService)
                     }
                 }
             } else if vm.isGenerating, let frame = vm.progressiveFrame {

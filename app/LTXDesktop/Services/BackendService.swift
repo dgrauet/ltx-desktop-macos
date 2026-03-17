@@ -22,6 +22,30 @@ class BackendService: ObservableObject {
         return try await get("/api/v1/system/memory")
     }
 
+    func hardwareLimits() async throws -> HardwareLimitsResponse {
+        return try await get("/api/v1/system/hardware-limits")
+    }
+
+    func memoryPressure() async throws -> MemoryPressureResponse {
+        return try await get("/api/v1/system/memory-pressure")
+    }
+
+    func updateMemoryPressureSettings(autoPauseEnabled: Bool?, autoCleanupEnabled: Bool?) async throws -> MemoryPressureResponse {
+        struct Body: Encodable {
+            let auto_pause_enabled: Bool?
+            let auto_cleanup_enabled: Bool?
+        }
+        return try await post(
+            "/api/v1/system/memory-pressure/settings",
+            body: Body(auto_pause_enabled: autoPauseEnabled, auto_cleanup_enabled: autoCleanupEnabled)
+        )
+    }
+
+    @discardableResult
+    func resumeMemoryPressurePause() async throws -> MemoryPressureResponse {
+        return try await post("/api/v1/system/memory-pressure/resume", body: EmptyBody())
+    }
+
     // MARK: - Generation
 
     func generateTextToVideo(request: T2VRequest, priority: String = "normal") async throws -> QueueSubmitResponse {
@@ -47,7 +71,8 @@ class BackendService: ObservableObject {
     // MARK: - Queue Management
 
     func getQueue() async throws -> [QueueEntry] {
-        return try await get("/api/v1/queue")
+        let response: QueueResponse = try await get("/api/v1/queue")
+        return response.jobs
     }
 
     func changeJobPriority(jobId: String, priority: String) async throws -> SuccessResponse {
@@ -215,6 +240,44 @@ class BackendService: ObservableObject {
             throw BackendError.requestFailed(code, body)
         }
         return try decoder.decode(SuccessResponse.self, from: data)
+    }
+
+    // MARK: - Presets
+
+    func listPresets() async throws -> [GenerationPreset] {
+        return try await get("/api/v1/presets")
+    }
+
+    func createPreset(name: String, params: PresetParams) async throws -> GenerationPreset {
+        return try await post("/api/v1/presets", body: CreatePresetRequest(name: name, params: params))
+    }
+
+    @discardableResult
+    func deletePreset(presetId: String) async throws -> SuccessResponse {
+        let url = URL(string: "\(baseURL)/api/v1/presets/\(presetId)")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let body = String(data: data, encoding: .utf8) ?? "(no body)"
+            throw BackendError.requestFailed(code, body)
+        }
+        return try decoder.decode(SuccessResponse.self, from: data)
+    }
+
+    // MARK: - Audio (TTS, Music, Mix)
+
+    func generateTTS(request: TTSRequest) async throws -> PathResponse {
+        return try await post("/api/v1/audio/tts", body: request)
+    }
+
+    func generateMusic(request: MusicRequest) async throws -> PathResponse {
+        return try await post("/api/v1/audio/music", body: request)
+    }
+
+    func mixAudio(request: AudioMixRequest) async throws -> PathResponse {
+        return try await post("/api/v1/audio/mix", body: request)
     }
 
     // MARK: - Export

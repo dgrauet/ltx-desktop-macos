@@ -28,6 +28,17 @@ class GenerationViewModel: ObservableObject {
     @Published var queueEntries: [QueueEntry] = []
     @Published var currentJobId: String? = nil
 
+    // Hardware limits
+    @Published var hardwareLimits: HardwareLimitsResponse?
+
+    // LoRA selection
+    @Published var availableLoRAs: [LoRAInfo] = []
+    @Published var selectedLoRAIds: Set<String> = []
+
+    // Presets
+    @Published var presets: [GenerationPreset] = []
+    @Published var selectedPresetId: String? = nil
+
     private var queuePollTask: Task<Void, Never>? = nil
 
     enum Resolution: String, CaseIterable, Identifiable {
@@ -133,7 +144,8 @@ class GenerationViewModel: ObservableObject {
                     seed: seed,
                     fps: fps,
                     imageStrength: imageStrength,
-                    upscale: upscale
+                    upscale: upscale,
+                    loraIds: selectedLoRAIdArray
                 )
                 submitResponse = try await service.generateImageToVideo(request: request, priority: priority)
             } else {
@@ -145,7 +157,8 @@ class GenerationViewModel: ObservableObject {
                     steps: steps,
                     seed: seed,
                     fps: fps,
-                    upscale: upscale
+                    upscale: upscale,
+                    loraIds: selectedLoRAIdArray
                 )
                 submitResponse = try await service.generateTextToVideo(request: request, priority: priority)
             }
@@ -238,7 +251,8 @@ class GenerationViewModel: ObservableObject {
             seed: seed,
             sourceImagePath: sourceImagePath,
             imageStrength: imageStrength,
-            upscale: upscale
+            upscale: upscale,
+            loraIds: selectedLoRAIdArray
         )
 
         do {
@@ -335,5 +349,129 @@ class GenerationViewModel: ObservableObject {
     private func stopQueuePolling() {
         queuePollTask?.cancel()
         queuePollTask = nil
+    }
+
+    // MARK: - Hardware Limits
+
+    func fetchHardwareLimits(service: BackendService) async {
+        hardwareLimits = try? await service.hardwareLimits()
+    }
+
+    // MARK: - LoRA Selection
+
+    /// Fetch available LoRAs from the backend. Only shows loaded (active) LoRAs as selected.
+    func fetchLoRAs(service: BackendService) async {
+        do {
+            let loras = try await service.listLoRAs()
+            availableLoRAs = loras.filter { $0.compatible }
+            // Auto-select LoRAs that are currently loaded in the backend
+            selectedLoRAIds = Set(loras.filter { $0.loaded }.map { $0.id })
+        } catch {
+            // Silently fail — LoRA fetching is best-effort
+        }
+    }
+
+    /// Toggle a LoRA's selection for the next generation.
+    func toggleLoRASelection(_ loraId: String) {
+        if selectedLoRAIds.contains(loraId) {
+            selectedLoRAIds.remove(loraId)
+        } else {
+            selectedLoRAIds.insert(loraId)
+        }
+    }
+
+    /// Array of selected LoRA IDs for inclusion in generation requests.
+    var selectedLoRAIdArray: [String] {
+        Array(selectedLoRAIds)
+    }
+
+    /// Whether RAM is below 32GB (show red warning banner).
+    var isLowRAM: Bool {
+        guard let limits = hardwareLimits else { return false }
+        return limits.totalRamGb < 32
+    }
+
+    /// Warning message for the current resolution/frame combination, or nil if within limits.
+    var resolutionWarning: String? {
+        guard let limits = hardwareLimits else { return nil }
+        let w = selectedResolution.width
+        let h = selectedResolution.height
+
+        // Check if this resolution exists in the limits
+        if let limit = limits.resolutionLimits.first(where: { $0.width == w && $0.height == h }) {
+            if numFrames > limit.maxFrames {
+                return "Too many frames for your hardware (\(limits.totalRamGb)GB RAM). Recommended max: \(limit.maxFrames) frames at this resolution."
+            }
+            return nil
+        }
+
+        // Resolution not in limits at all — exceeds hardware
+        return "This resolution may cause out-of-memory on your hardware (\(limits.totalRamGb)GB RAM)."
+    }
+
+    /// Maximum recommended frames for the current resolution.
+    var recommendedMaxFrames: Int? {
+        guard let limits = hardwareLimits else { return nil }
+        let w = selectedResolution.width
+        let h = selectedResolution.height
+        return limits.resolutionLimits.first(where: { $0.width == w && $0.height == h })?.maxFrames
+    }
+
+    // MARK: - Presets
+
+    func loadPresets(service: BackendService) async {
+        do {
+            presets = try await service.listPresets()
+        } catch {
+            // Silently fail — presets are non-critical
+        }
+    }
+
+    func saveCurrentAsPreset(name: String, using service: BackendService) async {
+        let params = PresetParams(
+            width: selectedResolution.width,
+            height: selectedResolution.height,
+            numFrames: numFrames,
+            steps: steps,
+            seed: seed,
+            fps: fps,
+            guidanceScale: 1.0,
+            negativePrompt: "",
+            generateAudio: false,
+            ffmpegUpscale: upscale
+        )
+        do {
+            let preset = try await service.createPreset(name: name, params: params)
+            presets.append(preset)
+            selectedPresetId = preset.id
+        } catch {
+            errorMessage = "Failed to save preset: \(error.localizedDescription)"
+        }
+    }
+
+    func applyPreset(_ preset: GenerationPreset) {
+        let p = preset.params
+        // Find matching resolution enum case
+        if let res = Resolution.allCases.first(where: { $0.width == p.width && $0.height == p.height }) {
+            selectedResolution = res
+        }
+        numFrames = p.numFrames
+        steps = p.steps
+        seed = p.seed
+        fps = p.fps
+        upscale = p.ffmpegUpscale ?? false
+        selectedPresetId = preset.id
+    }
+
+    func deletePreset(_ presetId: String, using service: BackendService) async {
+        do {
+            try await service.deletePreset(presetId: presetId)
+            presets.removeAll { $0.id == presetId }
+            if selectedPresetId == presetId {
+                selectedPresetId = nil
+            }
+        } catch {
+            errorMessage = "Failed to delete preset: \(error.localizedDescription)"
+        }
     }
 }

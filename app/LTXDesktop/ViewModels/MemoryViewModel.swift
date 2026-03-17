@@ -5,6 +5,11 @@ import SwiftUI
 class MemoryViewModel: ObservableObject {
     @Published var memoryStats: MemoryStats?
     @Published var systemInfo: SystemInfoResponse?
+    @Published var pressureLevel: String = "normal"
+    @Published var isQueuePausedByPressure: Bool = false
+    @Published var autoPauseEnabled: Bool = true
+    @Published var autoCleanupEnabled: Bool = true
+    @Published var lastActions: [String] = []
 
     private var pollingTask: Task<Void, Never>?
 
@@ -20,6 +25,16 @@ class MemoryViewModel: ObservableObject {
 
             while !Task.isCancelled {
                 memoryStats = try? await service.memoryStats()
+
+                // Fetch pressure state alongside memory stats
+                if let pressure = try? await service.memoryPressure() {
+                    pressureLevel = pressure.pressureLevel ?? "normal"
+                    isQueuePausedByPressure = pressure.pausedByPressure
+                    autoPauseEnabled = pressure.autoPauseEnabled
+                    autoCleanupEnabled = pressure.autoCleanupEnabled
+                    lastActions = pressure.actions
+                }
+
                 try? await Task.sleep(for: .seconds(interval))
             }
         }
@@ -45,5 +60,38 @@ class MemoryViewModel: ObservableObject {
     var lowAvailableWarning: Bool {
         guard let stats = memoryStats else { return false }
         return stats.systemAvailableGb < 4.0
+    }
+
+    // MARK: - Pressure Actions
+
+    func toggleAutoPause(service: BackendService) {
+        let newValue = !autoPauseEnabled
+        Task {
+            if let result = try? await service.updateMemoryPressureSettings(
+                autoPauseEnabled: newValue, autoCleanupEnabled: nil
+            ) {
+                autoPauseEnabled = result.autoPauseEnabled
+                isQueuePausedByPressure = result.pausedByPressure
+            }
+        }
+    }
+
+    func toggleAutoCleanup(service: BackendService) {
+        let newValue = !autoCleanupEnabled
+        Task {
+            if let result = try? await service.updateMemoryPressureSettings(
+                autoPauseEnabled: nil, autoCleanupEnabled: newValue
+            ) {
+                autoCleanupEnabled = result.autoCleanupEnabled
+            }
+        }
+    }
+
+    func resumeQueue(service: BackendService) {
+        Task {
+            if let result = try? await service.resumeMemoryPressurePause() {
+                isQueuePausedByPressure = result.pausedByPressure
+            }
+        }
     }
 }

@@ -202,6 +202,75 @@ struct SettingsView: View {
                                 color: .red
                             )
                         }
+
+                        Divider()
+
+                        // Memory Pressure Actions
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Automated Actions")
+                                .font(.headline)
+
+                            // Queue status
+                            if memoryVM.isQueuePausedByPressure {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "pause.circle.fill")
+                                        .foregroundStyle(.red)
+                                    Text("Queue paused by memory pressure")
+                                        .font(.callout)
+                                        .foregroundStyle(.red)
+                                    Spacer()
+                                    Button("Resume Queue") {
+                                        memoryVM.resumeQueue(service: backendService)
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
+                                    .tint(.blue)
+                                }
+                                .padding(10)
+                                .background(Color.red.opacity(0.1))
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                            } else {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(.green)
+                                    Text("Queue running normally")
+                                        .font(.callout)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+
+                            // Auto-pause toggle
+                            Toggle(isOn: Binding(
+                                get: { memoryVM.autoPauseEnabled },
+                                set: { _ in memoryVM.toggleAutoPause(service: backendService) }
+                            )) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Auto-pause queue on low memory")
+                                        .font(.body)
+                                    Text("Pauses queue when available memory drops below 2 GB. Resumes automatically when memory recovers above 4 GB.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                            .toggleStyle(.switch)
+
+                            // Auto-cleanup toggle
+                            Toggle(isOn: Binding(
+                                get: { memoryVM.autoCleanupEnabled },
+                                set: { _ in memoryVM.toggleAutoCleanup(service: backendService) }
+                            )) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Auto-cleanup Metal cache")
+                                        .font(.body)
+                                    Text("Automatically cleans up Metal memory cache when it exceeds 2x active memory usage.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                            .toggleStyle(.switch)
+                        }
                     } else {
                         VStack(spacing: 12) {
                             ProgressView()

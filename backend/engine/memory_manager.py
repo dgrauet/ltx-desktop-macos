@@ -134,6 +134,129 @@ def periodic_reload_check(model_manager: object) -> bool:
     return False
 
 
+class MemoryPressureMonitor:
+    """Monitors memory pressure and takes automated actions.
+
+    Actions:
+    - cache > 2x active → aggressive_cleanup()
+    - available < 2GB → pause job queue
+    - available > 4GB after pause → resume job queue
+    """
+
+    def __init__(self) -> None:
+        self.auto_pause_enabled: bool = True
+        self.auto_cleanup_enabled: bool = True
+        self._paused_by_pressure: bool = False
+        self._last_actions: list[str] = []
+
+    def check_pressure(self, job_queue: object | None = None) -> dict:
+        """Check memory pressure and take automated actions.
+
+        Args:
+            job_queue: JobQueue instance with pause()/resume()/is_paused.
+
+        Returns:
+            Dictionary with pressure level, actions taken, and current state.
+        """
+        stats = get_memory_stats()
+        actions: list[str] = []
+        pressure_level = "normal"
+
+        active = stats["active_memory_gb"]
+        cache = stats["cache_memory_gb"]
+        available = stats["system_available_gb"]
+
+        # Check cache pressure
+        if self.auto_cleanup_enabled and active > 0 and cache > 2 * active:
+            aggressive_cleanup()
+            actions.append("cache_cleanup")
+            pressure_level = "warning"
+            log.info(
+                "Memory pressure: cache (%.2f GB) > 2x active (%.2f GB) — cleaned up",
+                cache, active,
+            )
+
+        # Check low available memory → pause queue
+        if self.auto_pause_enabled and available < 2.0 and job_queue is not None:
+            if not self._paused_by_pressure:
+                _pause_queue(job_queue)
+                self._paused_by_pressure = True
+                actions.append("queue_paused")
+                log.warning(
+                    "Memory pressure: available %.2f GB < 2 GB — pausing queue",
+                    available,
+                )
+            pressure_level = "critical"
+
+        # Check recovery → resume queue
+        if self._paused_by_pressure and available > 4.0 and job_queue is not None:
+            _resume_queue(job_queue)
+            self._paused_by_pressure = False
+            actions.append("queue_resumed")
+            log.info(
+                "Memory pressure recovered: available %.2f GB > 4 GB — resuming queue",
+                available,
+            )
+            if pressure_level == "normal":
+                pressure_level = "normal"
+
+        # Set pressure level based on thresholds even if no action taken
+        if pressure_level == "normal":
+            if available < 4.0:
+                pressure_level = "warning"
+            if active > 0 and cache > 2 * active:
+                pressure_level = "warning"
+
+        self._last_actions = actions
+
+        return {
+            "pressure_level": pressure_level,
+            "actions_taken": actions,
+            "paused_by_pressure": self._paused_by_pressure,
+            "auto_pause_enabled": self.auto_pause_enabled,
+            "auto_cleanup_enabled": self.auto_cleanup_enabled,
+            "memory": stats,
+        }
+
+    def get_state(self) -> dict:
+        """Return current monitor state without taking actions."""
+        return {
+            "paused_by_pressure": self._paused_by_pressure,
+            "auto_pause_enabled": self.auto_pause_enabled,
+            "auto_cleanup_enabled": self.auto_cleanup_enabled,
+            "last_actions": self._last_actions,
+        }
+
+    def manual_resume(self, job_queue: object | None = None) -> bool:
+        """Manually resume a queue paused by memory pressure.
+
+        Returns:
+            True if the queue was resumed.
+        """
+        if self._paused_by_pressure and job_queue is not None:
+            _resume_queue(job_queue)
+            self._paused_by_pressure = False
+            log.info("Memory pressure pause manually overridden — queue resumed")
+            return True
+        return False
+
+
+def _pause_queue(job_queue: object) -> None:
+    """Pause a job queue (duck-typed)."""
+    if hasattr(job_queue, "pause"):
+        job_queue.pause()  # type: ignore[attr-defined]
+
+
+def _resume_queue(job_queue: object) -> None:
+    """Resume a job queue (duck-typed)."""
+    if hasattr(job_queue, "resume"):
+        job_queue.resume()  # type: ignore[attr-defined]
+
+
+# --- Singleton monitor instance ---
+memory_pressure_monitor = MemoryPressureMonitor()
+
+
 def _get_system_available_memory_gb() -> float:
     """Get available system memory in GB (macOS-specific)."""
     if platform.system() != "Darwin":

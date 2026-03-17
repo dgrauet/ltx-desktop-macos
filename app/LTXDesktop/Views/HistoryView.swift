@@ -3,9 +3,12 @@ import AVKit
 import UniformTypeIdentifiers
 
 struct HistoryView: View {
+    @EnvironmentObject var backendService: BackendService
     @StateObject private var vm = HistoryViewModel()
     @State private var showDeleteConfirmation = false
     @State private var videoToDelete: VideoItem? = nil
+    @State private var retakeVideo: VideoItem? = nil
+    @State private var extendVideo: VideoItem? = nil
 
     let columns = [
         GridItem(.adaptive(minimum: 180, maximum: 220), spacing: 12)
@@ -50,6 +53,21 @@ struct HistoryView: View {
         } message: { item in
             Text("Are you sure you want to delete \"\(item.displayName)\"? This cannot be undone.")
         }
+        .sheet(item: $retakeVideo) { item in
+            RetakeSheet(
+                sourceVideoPath: item.outputPath,
+                videoDuration: item.durationSeconds,
+                fps: item.fps
+            )
+            .environmentObject(backendService)
+        }
+        .sheet(item: $extendVideo) { item in
+            ExtendSheet(
+                sourceVideoPath: item.outputPath,
+                fps: item.fps
+            )
+            .environmentObject(backendService)
+        }
     }
 
     // MARK: - Grid Panel
@@ -79,6 +97,17 @@ struct HistoryView: View {
                                 vm.selectedVideo = item
                             }
                             .contextMenu {
+                                Button {
+                                    retakeVideo = item
+                                } label: {
+                                    Label("Retake Segment", systemImage: "arrow.triangle.2.circlepath")
+                                }
+                                Button {
+                                    extendVideo = item
+                                } label: {
+                                    Label("Extend Video", systemImage: "arrow.right.to.line")
+                                }
+                                Divider()
                                 Button(role: .destructive) {
                                     videoToDelete = item
                                     showDeleteConfirmation = true
@@ -258,6 +287,8 @@ struct VideoDetailView: View {
     @EnvironmentObject var backendService: BackendService
     @State private var player: AVPlayer?
     @State private var showExportSheet = false
+    @State private var showRetakeSheet = false
+    @State private var showExtendSheet = false
 
     private static let fullDateFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -329,6 +360,36 @@ struct VideoDetailView: View {
                     .sheet(isPresented: $showExportSheet) {
                         ExportSheet(videoPath: item.outputPath, clipName: item.displayName)
                             .environmentObject(backendService)
+                    }
+
+                    // Retake & Extend
+                    HStack(spacing: 8) {
+                        Button(action: { showRetakeSheet = true }) {
+                            Label("Retake", systemImage: "arrow.triangle.2.circlepath")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button(action: { showExtendSheet = true }) {
+                            Label("Extend", systemImage: "arrow.right.to.line")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    .sheet(isPresented: $showRetakeSheet) {
+                        RetakeSheet(
+                            sourceVideoPath: item.outputPath,
+                            videoDuration: item.durationSeconds,
+                            fps: item.fps
+                        )
+                        .environmentObject(backendService)
+                    }
+                    .sheet(isPresented: $showExtendSheet) {
+                        ExtendSheet(
+                            sourceVideoPath: item.outputPath,
+                            fps: item.fps
+                        )
+                        .environmentObject(backendService)
                     }
 
                     Button(action: {

@@ -30,6 +30,14 @@
 		A100000013 /* LoRAInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000013 /* LoRAInfo.swift */; };
 		A100000014 /* ExportRequests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000014 /* ExportRequests.swift */; };
 		A100000015 /* ModelsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000015 /* ModelsViewModel.swift */; };
+		A100000016 /* QueueView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000016 /* QueueView.swift */; };
+		A100000017 /* QueueViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000017 /* QueueViewModel.swift */; };
+		A100000018 /* RetakeSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000018 /* RetakeSheet.swift */; };
+		A100000019 /* ExtendSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000019 /* ExtendSheet.swift */; };
+		A10000001A /* GenerationPreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000001A /* GenerationPreset.swift */; };
+		A10000001B /* AudioRequests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000001B /* AudioRequests.swift */; };
+		A10000001C /* AudioViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000001C /* AudioViewModel.swift */; };
+		A10000001D /* AudioPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000001D /* AudioPanelView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -57,6 +65,14 @@
 		A200000013 /* LoRAInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoRAInfo.swift; sourceTree = "<group>"; };
 		A200000014 /* ExportRequests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportRequests.swift; sourceTree = "<group>"; };
 		A200000015 /* ModelsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelsViewModel.swift; sourceTree = "<group>"; };
+		A200000016 /* QueueView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueView.swift; sourceTree = "<group>"; };
+		A200000017 /* QueueViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueViewModel.swift; sourceTree = "<group>"; };
+		A200000018 /* RetakeSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RetakeSheet.swift; sourceTree = "<group>"; };
+		A200000019 /* ExtendSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtendSheet.swift; sourceTree = "<group>"; };
+		A20000001A /* GenerationPreset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerationPreset.swift; sourceTree = "<group>"; };
+		A20000001B /* AudioRequests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRequests.swift; sourceTree = "<group>"; };
+		A20000001C /* AudioViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioViewModel.swift; sourceTree = "<group>"; };
+		A20000001D /* AudioPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioPanelView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -100,6 +116,10 @@
 				0AAC86232F5C6215008A3AFC /* LoRAView.swift */,
 				0AAC86252F5C6216008A3AFC /* SettingsView.swift */,
 				A20000000B /* ExportSheet.swift */,
+				A200000016 /* QueueView.swift */,
+				A200000018 /* RetakeSheet.swift */,
+				A200000019 /* ExtendSheet.swift */,
+				A20000001D /* AudioPanelView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -112,6 +132,8 @@
 				A20000000D /* LoRAViewModel.swift */,
 				A20000000E /* MemoryViewModel.swift */,
 				A200000015 /* ModelsViewModel.swift */,
+				A200000017 /* QueueViewModel.swift */,
+				A20000001C /* AudioViewModel.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -127,6 +149,8 @@
 				A200000012 /* GenerationRequests.swift */,
 				A200000013 /* LoRAInfo.swift */,
 				A200000014 /* ExportRequests.swift */,
+				A20000001A /* GenerationPreset.swift */,
+				A20000001B /* AudioRequests.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -247,6 +271,14 @@
 				A100000013 /* LoRAInfo.swift in Sources */,
 				A100000014 /* ExportRequests.swift in Sources */,
 				A100000015 /* ModelsViewModel.swift in Sources */,
+				A100000016 /* QueueView.swift in Sources */,
+				A100000017 /* QueueViewModel.swift in Sources */,
+				A100000018 /* RetakeSheet.swift in Sources */,
+				A100000019 /* ExtendSheet.swift in Sources */,
+				A10000001A /* GenerationPreset.swift in Sources */,
+				A10000001B /* AudioRequests.swift in Sources */,
+				A10000001C /* AudioViewModel.swift in Sources */,
+				A10000001D /* AudioPanelView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

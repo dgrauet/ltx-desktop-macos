@@ -282,6 +282,11 @@ def main() -> None:
     parser.add_argument("--output-path", type=str, required=True)
     parser.add_argument("--image", type=str, default=None)
     parser.add_argument("--image-strength", type=float, default=1.0)
+    parser.add_argument(
+        "--image-frame-idx", type=int, default=0,
+        help="Latent frame index to condition with the reference image "
+             "(0 = first frame, -1 = last frame). Used for backward extend.",
+    )
     parser.add_argument("--generate-audio", action="store_true")
     parser.add_argument(
         "--upscale", type=str, default=None,
@@ -304,6 +309,18 @@ def main() -> None:
         "--lora", action="append", default=[],
         help="LoRA to apply. Format: /path/to/file.safetensors:strength "
              "(can be specified multiple times for stacking LoRAs)",
+    )
+    parser.add_argument(
+        "--retake-source", type=str, default=None,
+        help="Path to source video for retake (segment regeneration)",
+    )
+    parser.add_argument(
+        "--retake-start-frame", type=int, default=0,
+        help="First frame index of the retake region (inclusive, in latent space)",
+    )
+    parser.add_argument(
+        "--retake-end-frame", type=int, default=-1,
+        help="Last frame index of the retake region (exclusive, in latent space; -1 = last)",
     )
     args = parser.parse_args()
 
@@ -345,7 +362,11 @@ def main() -> None:
         generate,
     )
 
-    if args.upscale:
+    if args.retake_source:
+        # Retake pipeline: regenerate a temporal segment of an existing video
+        _run_retake_stage(args, model, model_dir, prompt_embeds, prompt_mask,
+                          audio_embeds, audio_mask)
+    elif args.upscale:
         # Two-stage pipeline: half res -> upscale -> refine at target res
         _run_two_stage(args, model, model_dir, prompt_embeds, prompt_mask,
                        audio_embeds, audio_mask)
@@ -386,6 +407,20 @@ def _run_single_stage(
     if args.image:
         config.image_latent = _encode_image(args.image, model_dir, args.height, args.width)
         config.image_strength = args.image_strength
+        # Resolve frame index: -1 means last latent frame
+        frame_idx = args.image_frame_idx
+        if frame_idx < 0:
+            frame_idx = config.image_frame_idx  # Will be resolved after latent shape is known
+            # Compute last latent frame index from pixel frames
+            from .patchifier import SpatioTemporalScaleFactors, VideoLatentShape
+            latent_shape = VideoLatentShape.from_pixel_shape(
+                batch=1, channels=128, num_frames=args.num_frames,
+                height=args.height, width=args.width,
+                scale_factors=SpatioTemporalScaleFactors(),
+            )
+            frame_idx = latent_shape.frames - 1
+            log.info("Backward extend: conditioning at last latent frame %d", frame_idx)
+        config.image_frame_idx = frame_idx
 
     # Load VAE decoder for intermediate preview frames (if enabled)
     preview_decoder = None
@@ -485,6 +520,17 @@ def _run_two_stage(
     if stage1_image_latent is not None:
         config_s1.image_latent = stage1_image_latent
         config_s1.image_strength = args.image_strength
+        # Resolve frame index for two-stage
+        frame_idx = args.image_frame_idx
+        if frame_idx < 0:
+            from .patchifier import SpatioTemporalScaleFactors, VideoLatentShape
+            latent_shape = VideoLatentShape.from_pixel_shape(
+                batch=1, channels=128, num_frames=args.num_frames,
+                height=half_height, width=half_width,
+                scale_factors=SpatioTemporalScaleFactors(),
+            )
+            frame_idx = latent_shape.frames - 1
+        config_s1.image_frame_idx = frame_idx
 
     # Load VAE decoder for intermediate preview frames (if enabled)
     preview_decoder = None
@@ -580,6 +626,17 @@ def _run_two_stage(
     if stage2_image_latent is not None:
         config_s2.image_latent = stage2_image_latent
         config_s2.image_strength = args.image_strength
+        # Resolve frame index for Stage 2 at target resolution
+        frame_idx_s2 = args.image_frame_idx
+        if frame_idx_s2 < 0:
+            from .patchifier import SpatioTemporalScaleFactors, VideoLatentShape
+            latent_shape_s2 = VideoLatentShape.from_pixel_shape(
+                batch=1, channels=128, num_frames=args.num_frames,
+                height=args.height, width=args.width,
+                scale_factors=SpatioTemporalScaleFactors(),
+            )
+            frame_idx_s2 = latent_shape_s2.frames - 1
+        config_s2.image_frame_idx = frame_idx_s2
 
     # Reload preview decoder for Stage 2 previews (if enabled)
     if args.preview_interval > 0 and preview_dir:
@@ -702,6 +759,248 @@ def _encode_image(image_path: str, model_dir: Path, height: int, width: int) -> 
     mx.clear_cache()
 
     return latent
+
+
+def _extract_video_frames(
+    video_path: str, height: int, width: int, num_frames: int
+) -> mx.array:
+    """Extract frames from a video file using ffmpeg and return as a tensor.
+
+    Extracts exactly `num_frames` frames, resized to (height, width).
+
+    Args:
+        video_path: Path to the source video file.
+        height: Target frame height.
+        width: Target frame width.
+        num_frames: Number of frames to extract.
+
+    Returns:
+        (1, 3, num_frames, height, width) tensor normalized to [-1, 1].
+    """
+    import subprocess
+
+    ffmpeg_bin = _find_ffmpeg()
+
+    # Extract raw RGB frames at target resolution
+    cmd = [
+        ffmpeg_bin,
+        "-i", video_path,
+        "-vf", f"scale={width}:{height}:flags=lanczos",
+        "-frames:v", str(num_frames),
+        "-pix_fmt", "rgb24",
+        "-f", "rawvideo",
+        "-",
+    ]
+    log.info("Extracting %d frames at %dx%d from %s", num_frames, width, height, video_path)
+    result = subprocess.run(cmd, capture_output=True, timeout=120)
+    if result.returncode != 0:
+        raise RuntimeError(f"ffmpeg frame extraction failed: {result.stderr.decode()[:500]}")
+
+    raw_bytes = np.frombuffer(result.stdout, dtype=np.uint8)
+    expected_bytes = num_frames * height * width * 3
+    actual_frames = len(raw_bytes) // (height * width * 3)
+    if len(raw_bytes) < expected_bytes:
+        log.warning(
+            "Extracted %d frames instead of %d — using actual count",
+            actual_frames, num_frames,
+        )
+        num_frames = actual_frames
+        raw_bytes = raw_bytes[:num_frames * height * width * 3]
+
+    # Reshape to (F, H, W, 3), normalize to [-1, 1], convert to (1, 3, F, H, W)
+    frames = raw_bytes.reshape(num_frames, height, width, 3).astype(np.float32) / 127.5 - 1.0
+    # (F, H, W, 3) -> (1, 3, F, H, W)
+    frames = np.transpose(frames, (3, 0, 1, 2))[np.newaxis, ...]
+    return mx.array(frames)
+
+
+def _encode_video(
+    video_path: str, model_dir: Path, height: int, width: int, num_frames: int
+) -> mx.array:
+    """Extract video frames and encode to latent space via VAE encoder.
+
+    Uses the reference mlx_video VideoEncoder for correct Conv3d ops.
+    Encodes the full video in one pass (num_frames must be 1+8k).
+
+    Args:
+        video_path: Path to the source video file.
+        model_dir: Path to model weights directory.
+        height: Video height (must be divisible by 32).
+        width: Video width (must be divisible by 32).
+        num_frames: Number of pixel frames (must be 1+8k, e.g. 9, 17, 25...).
+
+    Returns:
+        (1, 128, F', H', W') normalized latent tensor.
+    """
+    import json
+    from mlx_video.models.ltx.video_vae.encoder import VideoEncoder
+    from mlx_video.models.ltx.video_vae.video_vae import NormLayerType, LogVarianceType
+
+    log.info("Encoding source video: %s at %dx%d, %d frames", video_path, width, height, num_frames)
+    _progress("STATUS:Encoding source video")
+
+    # Extract frames
+    pixel_tensor = _extract_video_frames(video_path, height, width, num_frames)
+    log.info("Extracted pixel tensor: %s", pixel_tensor.shape)
+
+    # Load encoder config
+    config_path = model_dir / "embedded_config.json"
+    encoder_blocks = []
+    patch_size = 4
+    if config_path.exists():
+        with open(config_path) as f:
+            vae_cfg = json.load(f).get("vae", {})
+        encoder_blocks = [(b[0], b[1]) for b in vae_cfg.get("encoder_blocks", [])]
+        patch_size = vae_cfg.get("patch_size", 4)
+
+    # Create encoder
+    encoder = VideoEncoder(
+        encoder_blocks=encoder_blocks,
+        norm_layer=NormLayerType.PIXEL_NORM,
+        latent_log_var=LogVarianceType.UNIFORM,
+        patch_size=patch_size,
+    )
+
+    # Load weights
+    weights_path = model_dir / "vae_encoder.safetensors"
+    if not weights_path.exists():
+        raise FileNotFoundError(f"vae_encoder.safetensors not found in {model_dir}")
+
+    raw = mx.load(str(weights_path))
+    prefix = "vae_encoder."
+    encoder.load_weights(
+        [(k[len(prefix):], v) for k, v in raw.items() if k.startswith(prefix)],
+        strict=False,
+    )
+    mean_key = f"{prefix}per_channel_statistics._mean_of_means"
+    std_key = f"{prefix}per_channel_statistics._std_of_means"
+    if mean_key in raw:
+        encoder.latent_mean = raw[mean_key]
+        encoder.latent_std = raw[std_key]
+
+    # Materialize encoder parameters (mx.eval is MLX tensor materialization, NOT Python eval)
+    mx.eval(encoder.parameters())  # noqa: S307
+    log.info("VAE encoder loaded for video: %.2f GB active", mx.get_active_memory() / (1024**3))
+
+    # Encode video
+    latent = encoder(pixel_tensor)
+    mx.eval(latent)  # noqa: S307
+    log.info("Video encoded to latent: %s", latent.shape)
+
+    # Free encoder and pixel data
+    del encoder, raw, pixel_tensor
+    gc.collect()
+    mx.clear_cache()
+
+    return latent
+
+
+def _run_retake_stage(
+    args,
+    model,
+    model_dir: Path,
+    prompt_embeds: mx.array,
+    prompt_mask: mx.array | None,
+    audio_embeds: mx.array | None,
+    audio_mask: mx.array | None,
+) -> None:
+    """Retake pipeline: encode source video, create mask, run masked diffusion.
+
+    Regenerates the temporal segment [retake_start_frame, retake_end_frame)
+    while preserving everything outside.
+    """
+    from engine.ltx23_model.pipeline import GenerationConfig, generate
+
+    # Step 1: Encode source video to latent space
+    clean_latent = _encode_video(
+        args.retake_source, model_dir,
+        args.height, args.width, args.num_frames,
+    )
+    _report_memory("after_video_encode")
+
+    # Step 2: Create temporal denoise mask in latent space
+    # Latent temporal dim from VAE temporal downsampling
+    latent_frames = clean_latent.shape[2]
+    retake_start = args.retake_start_frame
+    retake_end = args.retake_end_frame if args.retake_end_frame >= 0 else latent_frames
+
+    # Clamp to valid range
+    retake_start = max(0, min(retake_start, latent_frames))
+    retake_end = max(retake_start, min(retake_end, latent_frames))
+
+    log.info(
+        "Retake mask: frames %d-%d of %d latent frames (regenerate), rest preserved",
+        retake_start, retake_end, latent_frames,
+    )
+
+    # Build mask: 0.0 = preserve (clean), 1.0 = regenerate (denoise)
+    mask_np = np.zeros((1, 1, latent_frames, 1, 1), dtype=np.float32)
+    mask_np[0, 0, retake_start:retake_end, 0, 0] = 1.0
+    denoise_mask = mx.array(mask_np)
+
+    # Step 3: Run diffusion with retake conditioning
+    config = GenerationConfig(
+        prompt_embeds=prompt_embeds,
+        prompt_attention_mask=prompt_mask,
+        height=args.height,
+        width=args.width,
+        num_frames=args.num_frames,
+        fps=float(args.fps),
+        seed=args.seed,
+        num_steps=args.num_steps,
+        retake_clean_latent=clean_latent,
+        retake_denoise_mask=denoise_mask,
+        audio_prompt_embeds=audio_embeds,
+        audio_prompt_attention_mask=audio_mask,
+        generate_audio=args.generate_audio and audio_embeds is not None,
+        low_memory=True,
+    )
+
+    # Load VAE decoder for intermediate preview frames (if enabled)
+    preview_decoder = None
+    preview_dir = None
+    if args.preview_interval > 0:
+        from engine.ltx23_model.vae_decoder import load_vae_decoder
+
+        preview_decoder = load_vae_decoder(model_dir)
+        preview_dir = tempfile.mkdtemp(prefix="ltx_preview_")
+        log.info("Preview decoder loaded, interval=%d", args.preview_interval)
+
+    def on_progress(step: int, total: int, latent: mx.array) -> None:
+        _progress(f"STAGE:1:STEP:{step}:{total}")
+        if preview_decoder and preview_dir and step % args.preview_interval == 0:
+            path = _decode_preview_frame(latent, preview_decoder, preview_dir, step)
+            if path:
+                _progress(f"PREVIEW:{path}")
+
+    _progress("STATUS:Generating video (retake)")
+    output = generate(model, config, progress_callback=on_progress)
+    _report_memory("after_diffusion")
+
+    # Free model and preview decoder before final VAE decode
+    del model, clean_latent, denoise_mask
+    if preview_decoder is not None:
+        del preview_decoder
+    gc.collect()
+    mx.clear_cache()
+
+    # VAE decode
+    _progress("STATUS:Decoding video")
+    _decode_and_save(output, args, model_dir)
+
+    # Optional ffmpeg 2x lanczos upscale as post-processing
+    if args.ffmpeg_upscale:
+        _progress("STATUS:Upscaling 2x (ffmpeg)")
+        _ffmpeg_upscale_2x(args.output_path)
+
+    # Clean up preview temp dir
+    if preview_dir:
+        import shutil
+        shutil.rmtree(preview_dir, ignore_errors=True)
+
+    _report_memory("final")
+    _progress("STATUS:Complete")
+    log.info("Retake generation complete: %s", args.output_path)
 
 
 def _ffmpeg_upscale_2x(video_path: str) -> None:
@@ -884,16 +1183,9 @@ def _decode_audio(
 
 
 def _find_ffmpeg() -> str:
-    """Find ffmpeg binary, checking common Homebrew paths."""
-    import shutil
-
-    path = shutil.which("ffmpeg")
-    if path:
-        return path
-    for candidate in ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"]:
-        if os.path.exists(candidate):
-            return candidate
-    raise FileNotFoundError("ffmpeg not found. Install with: brew install ffmpeg")
+    """Find ffmpeg binary — delegates to shared utility."""
+    from engine.ffmpeg_utils import find_ffmpeg
+    return find_ffmpeg()
 
 
 def _mux_video_audio(video_path: str, audio_path: str, output_path: str) -> None:

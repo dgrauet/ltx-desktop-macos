@@ -418,19 +418,9 @@ def decode_video(
 
 
 def _find_ffmpeg() -> str:
-    """Find ffmpeg binary, checking common Homebrew paths."""
-    import shutil
-
-    path = shutil.which("ffmpeg")
-    if path:
-        return path
-    # Homebrew on Apple Silicon / Intel
-    for candidate in ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"]:
-        if Path(candidate).exists():
-            return candidate
-    raise FileNotFoundError(
-        "ffmpeg not found. Install with: brew install ffmpeg"
-    )
+    """Find ffmpeg binary — delegates to shared utility."""
+    from engine.ffmpeg_utils import find_ffmpeg
+    return find_ffmpeg()
 
 
 def streaming_decode_to_ffmpeg(

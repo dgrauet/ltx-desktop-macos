@@ -76,6 +76,7 @@ class JobQueue:
         self._lock = asyncio.Lock()
         self._process_event = asyncio.Event()
         self._processor_task: asyncio.Task[None] | None = None
+        self._paused: bool = False
         # ETA tracking: job_type -> list of recent durations (up to 5)
         self._duration_history: dict[str, list[float]] = {}
         # Cancellation callback: job_id -> callable that cancels the running subprocess
@@ -97,6 +98,25 @@ class JobQueue:
                 pass
             self._processor_task = None
             log.info("Job queue processor stopped")
+
+    @property
+    def is_paused(self) -> bool:
+        """Whether the queue is paused (no new jobs will start)."""
+        return self._paused
+
+    def pause(self) -> None:
+        """Pause the queue. Currently running jobs continue, but no new jobs start."""
+        if not self._paused:
+            self._paused = True
+            log.info("Job queue paused — no new jobs will start")
+
+    def resume(self) -> None:
+        """Resume the queue. Queued jobs will begin processing again."""
+        if self._paused:
+            self._paused = False
+            log.info("Job queue resumed")
+            # Wake up the processor to check for pending jobs
+            self._process_event.set()
 
     async def submit(
         self,
@@ -229,29 +249,30 @@ class JobQueue:
             )
             return True
 
-    def get_queue_state(self) -> list[dict[str, Any]]:
+    def get_queue_state(self) -> dict[str, Any]:
         """Return the full queue state for the API.
 
         Returns:
-            List of job dicts with id, type, priority, state, position, prompt,
+            Dictionary with 'jobs' list and 'paused' boolean.
+            Each job has id, type, priority, state, position, prompt,
             submitted_at, eta_seconds.
         """
-        result: list[dict[str, Any]] = []
+        jobs: list[dict[str, Any]] = []
 
         # Running job first
         if self._running_job and self._running_job.state == JobState.RUNNING:
             j = self._running_job
-            result.append(self._job_to_dict(j, position=0))
+            jobs.append(self._job_to_dict(j, position=0))
 
         # Then queued jobs in priority order
         pos = 1
         for priority in Priority:
             for job in self._queues[priority]:
                 if job.state == JobState.QUEUED:
-                    result.append(self._job_to_dict(job, position=pos))
+                    jobs.append(self._job_to_dict(job, position=pos))
                     pos += 1
 
-        return result
+        return {"jobs": jobs, "paused": self._paused}
 
     def get_queue_length(self) -> int:
         """Return the number of queued (not yet running) jobs."""
@@ -352,6 +373,9 @@ class JobQueue:
 
             while True:
                 async with self._lock:
+                    if self._paused:
+                        # Queue is paused — don't start new jobs
+                        break
                     if self._running_job and self._running_job.state == JobState.RUNNING:
                         # Already running a job, wait for it to finish
                         break

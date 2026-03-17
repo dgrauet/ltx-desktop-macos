@@ -1,28 +1,28 @@
 """Retake pipeline — regenerate a specific time segment of an existing video.
 
-Sprint 3: stubbed inference that produces real MP4 files via ffmpeg.
-Real MLX inference will replace the stubs in a later sprint.
+Uses MLX inference to encode the source video to latent space, create a
+temporal region mask, and run masked diffusion to regenerate only the
+specified segment while preserving the surrounding context.
 """
 
 from __future__ import annotations
 
-import asyncio
 import inspect
 import logging
-import shutil
-import subprocess
 import time
 import uuid
 from pathlib import Path
 from typing import Callable
 
+from engine.ffmpeg_utils import probe_video_info
 from engine.memory_manager import (
     aggressive_cleanup,
-    get_memory_stats,
+    build_memory_stats_from_subprocess,
     increment_generation_count,
     periodic_reload_check,
     reset_peak_memory,
 )
+from engine.mlx_runner import run_mlx_generation
 from engine.model_manager import ModelManager
 from engine.pipelines.text_to_video import GenerationResult
 
@@ -31,9 +31,13 @@ log = logging.getLogger(__name__)
 # Output directory for retake results
 OUTPUT_DIR = Path.home() / ".ltx-desktop" / "outputs" / "retakes"
 
+# LTX-2.3 VAE temporal downsampling factor (pixel frames -> latent frames)
+# latent_frames = (pixel_frames - 1) / 8 + 1
+_VAE_TEMPORAL_FACTOR = 8
+
 
 class RetakePipeline:
-    """Regenerates a specific time segment of an existing video using MLX (stubbed for Sprint 3)."""
+    """Regenerates a specific time segment of an existing video using MLX."""
 
     def __init__(self, model_manager: ModelManager) -> None:
         self._model_manager = model_manager
@@ -47,13 +51,13 @@ class RetakePipeline:
         steps: int = 8,
         seed: int = 42,
         fps: int = 24,
+        model_repo_id: str | None = None,
         progress_callback: Callable[[int, int, float, str | None], None] | None = None,
     ) -> GenerationResult:
         """Regenerate a specific time segment of a video.
 
-        Extracts the target segment, runs diffusion conditioned on the
-        surrounding context, then muxes the new segment back into the
-        original video.
+        Encodes the full source video to latent space, masks the retake
+        region, runs diffusion with mask blending, then decodes and saves.
 
         Args:
             source_video_path: Absolute path to the source video file.
@@ -63,21 +67,33 @@ class RetakePipeline:
             steps: Number of denoising steps.
             seed: Random seed for reproducibility.
             fps: Frames per second (must match source video).
+            model_repo_id: Optional HuggingFace model repo ID.
             progress_callback: Optional callback(step, total_steps, pct, preview_frame).
 
         Returns:
             GenerationResult with output path, timing, and memory stats.
         """
+        # Validate source video
+        src_path = Path(source_video_path)
+        if not src_path.exists():
+            raise FileNotFoundError(f"Source video not found: {source_video_path}")
+
+        if end_time_s <= start_time_s:
+            raise ValueError(
+                f"end_time_s ({end_time_s}) must be greater than start_time_s ({start_time_s})"
+            )
+
         job_id = str(uuid.uuid4())[:8]
         stages: dict[str, float] = {}
         start_time = time.monotonic()
 
         async def _notify(
-            step: int, total: int, pct: float, frame: str | None = None
+            step: int, total: int, pct: float, frame: str | None = None,
+            *, status: str | None = None
         ) -> None:
             if not progress_callback:
                 return
-            result = progress_callback(step, total, pct, frame)
+            result = progress_callback(step, total, pct, frame, status=status)
             if inspect.isawaitable(result):
                 await result
 
@@ -87,75 +103,69 @@ class RetakePipeline:
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         output_path = OUTPUT_DIR / f"retake_{job_id}.mp4"
 
-        total_stages = 5
-        current_stage = 0
-
-        segment_duration = end_time_s - start_time_s
+        # Probe source video dimensions and frame count
+        source_width, source_height, source_num_frames = _probe_video_info(
+            source_video_path, fps
+        )
         log.info(
-            "[%s] Retake: source=%r segment=%.2fs–%.2fs (%.2fs) prompt=%r",
-            job_id,
-            source_video_path,
-            start_time_s,
-            end_time_s,
-            segment_duration,
-            prompt[:80],
+            "[%s] Retake: source=%r %dx%d %d frames, segment=%.2fs-%.2fs, prompt=%r",
+            job_id, source_video_path, source_width, source_height,
+            source_num_frames, start_time_s, end_time_s, prompt[:80],
         )
 
-        # Stage 1: Source analysis — probe the source video
-        log.info("[%s] Stage 1: Source video analysis", job_id)
-        t0 = time.monotonic()
-        source_width, source_height = _probe_video_dimensions(source_video_path)
-        log.info("[%s] Source dimensions: %dx%d", job_id, source_width, source_height)
-        stages["source_analysis"] = time.monotonic() - t0
-        aggressive_cleanup()
-        current_stage += 1
-        await _notify(current_stage, total_stages, current_stage / total_stages)
+        # Ensure num_frames follows the 1+8k constraint for the VAE
+        num_frames = _round_to_vae_compatible(source_num_frames)
+        if num_frames != source_num_frames:
+            log.info(
+                "[%s] Adjusted num_frames from %d to %d (VAE 1+8k constraint)",
+                job_id, source_num_frames, num_frames,
+            )
 
-        # Stage 2: Text encoding
-        log.info("[%s] Stage 2: Text encoding — prompt=%r", job_id, prompt[:80])
-        t0 = time.monotonic()
-        await asyncio.sleep(0.1)  # Stub: simulate text encoding
-        stages["text_encoding"] = time.monotonic() - t0
-        aggressive_cleanup()
-        current_stage += 1
-        await _notify(current_stage, total_stages, current_stage / total_stages)
+        # Convert time range to latent frame indices
+        # pixel_frame = time_s * fps
+        # latent_frame = (pixel_frame - 1) / 8 + 1, but frame 0 maps to latent 0
+        latent_frames = (num_frames - 1) // _VAE_TEMPORAL_FACTOR + 1
+        start_latent = _pixel_time_to_latent_frame(start_time_s, fps)
+        end_latent = _pixel_time_to_latent_frame(end_time_s, fps)
 
-        # Stage 3: Diffusion (retake region denoising)
-        log.info("[%s] Stage 3: Diffusion — %d steps (retake region)", job_id, steps)
-        t0 = time.monotonic()
-        for step in range(steps):
-            await asyncio.sleep(0.05)  # Stub: simulate denoising step
-            pct = (current_stage + (step + 1) / steps) / total_stages
-            await _notify(step + 1, steps, pct)
-        stages["diffusion"] = time.monotonic() - t0
-        aggressive_cleanup()
-        current_stage += 1
+        # Clamp to valid latent range
+        start_latent = max(0, min(start_latent, latent_frames))
+        end_latent = max(start_latent + 1, min(end_latent, latent_frames))
 
-        # Stage 4: VAE decode → stub segment video via ffmpeg
-        log.info("[%s] Stage 4: VAE decode → ffmpeg (retake segment)", job_id)
+        log.info(
+            "[%s] Latent mask: frames %d-%d of %d (regenerate)",
+            job_id, start_latent, end_latent, latent_frames,
+        )
+
+        # Adapt mlx_runner progress to pipeline progress_callback format
+        async def _progress_adapter(
+            step: int, total_steps: int, stage: int, pct: float,
+            *, status: str | None = None, preview_frame: str | None = None,
+        ) -> None:
+            await _notify(step, total_steps, pct, preview_frame, status=status)
+
+        # Run MLX inference with retake conditioning
         t0 = time.monotonic()
-        _generate_stub_retake_video(
-            source_video_path=source_video_path,
-            output_path=output_path,
-            width=source_width,
+
+        gen_result = await run_mlx_generation(
+            prompt=prompt,
             height=source_height,
-            start_time_s=start_time_s,
-            end_time_s=end_time_s,
+            width=source_width,
+            num_frames=num_frames,
+            seed=seed,
             fps=fps,
+            output_path=str(output_path),
+            num_steps=steps,
+            retake_source=source_video_path,
+            retake_start_frame=start_latent,
+            retake_end_frame=end_latent,
+            preview_interval=2,
+            progress_callback=_progress_adapter,
+            model_repo_id=model_repo_id,
         )
-        stages["vae_decode"] = time.monotonic() - t0
-        aggressive_cleanup()
-        current_stage += 1
-        await _notify(current_stage, total_stages, current_stage / total_stages)
 
-        # Stage 5: Mux new segment back into original video
-        log.info("[%s] Stage 5: Mux retake segment with original audio", job_id)
-        t0 = time.monotonic()
-        await asyncio.sleep(0.05)  # Stub: simulate audio mux
-        stages["mux"] = time.monotonic() - t0
+        stages["generation"] = time.monotonic() - t0
         aggressive_cleanup()
-        current_stage += 1
-        await _notify(current_stage, total_stages, 1.0)
 
         total_duration = time.monotonic() - start_time
         log.info("[%s] Retake complete in %.2fs → %s", job_id, total_duration, output_path)
@@ -163,106 +173,68 @@ class RetakePipeline:
         increment_generation_count()
         periodic_reload_check(self._model_manager)
 
+        subprocess_memory = gen_result.get("subprocess_memory", {})
+        memory_after = build_memory_stats_from_subprocess(subprocess_memory)
+
         return GenerationResult(
             job_id=job_id,
             output_path=str(output_path),
             duration_seconds=total_duration,
-            memory_after=get_memory_stats(),
+            memory_after=memory_after,
             stages=stages,
         )
 
 
-def _probe_video_dimensions(video_path: str) -> tuple[int, int]:
-    """Probe a video file for its width and height using ffprobe.
+def _probe_video_info(video_path: str, fps: int) -> tuple[int, int, int]:
+    """Probe a video file for dimensions and frame count.
+
+    Delegates to the shared ``probe_video_info`` utility and converts the
+    duration to a frame count using the given *fps*.
 
     Args:
         video_path: Absolute path to the video file.
+        fps: Expected FPS (used for frame count estimation from duration).
 
     Returns:
-        Tuple of (width, height). Falls back to (768, 512) if probing fails.
+        Tuple of (width, height, num_frames). Falls back to (768, 512, 97)
+        if probing fails.
     """
-    ffprobe_bin = shutil.which("ffprobe")
-    if not ffprobe_bin:
-        for p in ["/opt/homebrew/bin/ffprobe", "/usr/local/bin/ffprobe"]:
-            if Path(p).exists():
-                ffprobe_bin = p
-                break
-    if not ffprobe_bin or not Path(video_path).exists():
-        log.warning("ffprobe not found or source missing — using default 768×512")
-        return 768, 512
-
-    cmd = [
-        ffprobe_bin,
-        "-v", "error",
-        "-select_streams", "v:0",
-        "-show_entries", "stream=width,height",
-        "-of", "csv=p=0",
-        video_path,
-    ]
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-        if result.returncode == 0 and result.stdout.strip():
-            parts = result.stdout.strip().split(",")
-            return int(parts[0]), int(parts[1])
-    except Exception:
-        log.warning("ffprobe failed to read dimensions from %s", video_path)
-    return 768, 512
+    width, height, duration = probe_video_info(video_path)
+    # Default fallback from probe_video_info is (768, 512, 4.0)
+    num_frames = round(duration * fps)
+    if num_frames < 1:
+        num_frames = 97
+    return width, height, num_frames
 
 
-def _generate_stub_retake_video(
-    source_video_path: str,
-    output_path: Path,
-    width: int,
-    height: int,
-    start_time_s: float,
-    end_time_s: float,
-    fps: int,
-) -> None:
-    """Generate a placeholder retake MP4.
+def _round_to_vae_compatible(num_frames: int) -> int:
+    """Round frame count to nearest VAE-compatible value (1 + 8k).
 
-    In production this will be replaced by streaming VAE decode piped to
-    ffmpeg, then muxed back into the original video. For now we copy the
-    original video's non-retake segments and insert a stub solid-colour
-    clip for the retake region.
+    The LTX-2.3 VAE requires num_frames = 1 + 8*k (e.g. 1, 9, 17, 25...).
+    Rounds down to the nearest valid value.
+    """
+    if num_frames <= 1:
+        return 1
+    k = (num_frames - 1) // 8
+    return 1 + k * 8
+
+
+def _pixel_time_to_latent_frame(time_s: float, fps: int) -> int:
+    """Convert a time in seconds to a latent frame index.
+
+    The VAE downsamples temporally by 8x:
+        pixel_frame = time_s * fps
+        latent_frame ~ pixel_frame / 8
 
     Args:
-        source_video_path: Absolute path to the source video.
-        output_path: Where to write the output MP4.
-        width: Video width.
-        height: Video height.
-        start_time_s: Start of the retake region in seconds.
-        end_time_s: End of the retake region in seconds.
-        fps: Frames per second.
+        time_s: Time in seconds.
+        fps: Video frames per second.
+
+    Returns:
+        Latent frame index (integer).
     """
-    ffmpeg_bin = shutil.which("ffmpeg")
-    if not ffmpeg_bin:
-        for p in ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"]:
-            if Path(p).exists():
-                ffmpeg_bin = p
-                break
-    if not ffmpeg_bin:
-        raise RuntimeError("ffmpeg not found. Install with: brew install ffmpeg")
-
-    segment_duration = end_time_s - start_time_s
-
-    # Stub: produce a solid-colour clip of the retake region duration.
-    # In production: streaming VAE decode → retake segment → mux with original.
-    cmd = [
-        ffmpeg_bin,
-        "-y",
-        "-f", "lavfi",
-        "-i", f"color=c=0x2e1a1a:s={width}x{height}:d={segment_duration:.3f}:r={fps}",
-        "-f", "lavfi",
-        "-i", f"sine=frequency=330:duration={segment_duration:.3f}:sample_rate=44100",
-        "-c:v", "libx264",
-        "-preset", "ultrafast",
-        "-pix_fmt", "yuv420p",
-        "-c:a", "aac",
-        "-b:a", "128k",
-        "-shortest",
-        str(output_path),
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-    if result.returncode != 0:
-        raise RuntimeError(f"ffmpeg failed: {result.stderr[:500]}")
-    log.info("Stub retake video created: %s", output_path)
+    pixel_frame = time_s * fps
+    # The VAE maps pixel frames [0, 1..8] -> latent frame 0,
+    # pixel frames [9..16] -> latent frame 1, etc.
+    # More precisely: latent_frame = (pixel_frame) / 8, rounded
+    return max(0, round(pixel_frame / _VAE_TEMPORAL_FACTOR))

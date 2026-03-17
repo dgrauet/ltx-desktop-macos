@@ -80,6 +80,10 @@ class GenerationConfig:
     # Audio latent from Stage 1 (partially noised for Stage 2)
     initial_audio_latent: Optional[mx.array] = None
 
+    # Retake: regenerate a temporal segment while preserving the rest
+    retake_clean_latent: Optional[mx.array] = None  # Full video encoded to latent
+    retake_denoise_mask: Optional[mx.array] = None  # (1, 1, F', 1, 1): 1.0=regenerate, 0.0=preserve
+
     # Memory
     low_memory: bool = True
 
@@ -142,7 +146,22 @@ def generate(
     sigmas = config.sigmas or DISTILLED_SIGMAS
 
     # --- Initialize video latent state using mlx_video functions ---
-    if config.initial_latent is not None:
+    if config.retake_clean_latent is not None and config.retake_denoise_mask is not None:
+        # Retake: start from clean latent with noise added only in the retake region
+        mx.random.seed(config.seed)
+        clean = config.retake_clean_latent
+        mask = config.retake_denoise_mask  # (1, 1, F', 1, 1): 1.0=regen, 0.0=preserve
+
+        video_state = LatentState(
+            latent=clean,  # Will be noised below
+            clean_latent=clean,
+            denoise_mask=mask,
+        )
+        # Add noise only to the masked region via add_noise_with_state
+        video_state = add_noise_with_state(video_state, noise_scale=sigmas[0])
+        log.info("Retake: initialized with mask, noise_scale=%.4f", sigmas[0])
+
+    elif config.initial_latent is not None:
         # Stage 2: start from upscaled Stage 1 latent
         video_state = LatentState(
             latent=config.initial_latent,
@@ -236,8 +255,12 @@ def generate(
         video_flat = mx.transpose(mx.reshape(latent, (b, c, -1)), (0, 2, 1))
 
         # Per-token timesteps (reference: mlx_video.generate_av lines 246-256)
-        if config.image_latent is not None:
-            # I2V: mask (B,1,F,1,1) → broadcast → flatten to (B, num_tokens)
+        # Use masked timesteps when we have a denoise mask (I2V or retake)
+        _has_denoise_mask = (
+            config.image_latent is not None or config.retake_clean_latent is not None
+        )
+        if _has_denoise_mask:
+            # mask (B,1,F,1,1) → broadcast → flatten to (B, num_tokens)
             denoise_mask_flat = mx.broadcast_to(
                 video_state.denoise_mask, (b, 1, f, h, w)
             )
@@ -295,7 +318,8 @@ def generate(
 
         # Apply conditioning mask on x0 BEFORE Euler step
         # (reference: mlx_video.conditioning.latent.apply_denoise_mask)
-        if config.image_latent is not None:
+        # Used for I2V (preserve conditioned frame) and retake (preserve unmasked region)
+        if _has_denoise_mask:
             x0 = apply_denoise_mask(x0, video_state.clean_latent, video_state.denoise_mask)
 
         force_materialize(x0)

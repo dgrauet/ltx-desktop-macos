@@ -163,4 +163,4 @@ See `pyproject.toml`. Key packages:
 - `fastapi>=0.115.0`, `uvicorn>=0.32.0`, `websockets>=13.0`
 - `safetensors>=0.4.0`, `transformers>=4.51.0`, `huggingface-hub>=0.26.0`
 - `soundfile>=0.12.0` (for audio WAV output)
-- `mlx-audio>=0.3.0` (optional, for TTS — currently disabled due to mlx-lm pin conflict)
+- `mlx-audio>=0.4.1` (TTS via Kokoro — mlx-lm pin conflict resolved in 0.4.1+)

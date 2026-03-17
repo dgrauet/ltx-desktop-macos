@@ -10,11 +10,13 @@ struct T2VRequest: Codable {
     var guidanceScale: Double = 1.0
     var fps: Int = 24
     var upscale: Bool = false
+    var loraIds: [String] = []
 
     enum CodingKeys: String, CodingKey {
         case prompt, width, height, steps, seed, fps, upscale
         case numFrames = "num_frames"
         case guidanceScale = "guidance_scale"
+        case loraIds = "lora_ids"
     }
 }
 
@@ -25,11 +27,13 @@ struct PreviewRequest: Codable {
     var sourceImagePath: String?
     var imageStrength: Double = 1.0
     var upscale: Bool = false
+    var loraIds: [String] = []
 
     enum CodingKeys: String, CodingKey {
         case prompt, seed, fps, upscale
         case sourceImagePath = "source_image_path"
         case imageStrength = "image_strength"
+        case loraIds = "lora_ids"
     }
 }
 
@@ -45,6 +49,7 @@ struct I2VRequest: Codable {
     var fps: Int = 24
     var imageStrength: Double = 1.0
     var upscale: Bool = false
+    var loraIds: [String] = []
 
     enum CodingKeys: String, CodingKey {
         case prompt, width, height, steps, seed, fps, upscale
@@ -52,6 +57,7 @@ struct I2VRequest: Codable {
         case numFrames = "num_frames"
         case guidanceScale = "guidance_scale"
         case imageStrength = "image_strength"
+        case loraIds = "lora_ids"
     }
 }
 
@@ -77,7 +83,12 @@ struct QueueSubmitResponse: Codable {
 }
 
 /// A single entry from GET /api/v1/queue.
-struct QueueEntry: Codable, Identifiable {
+struct QueueResponse: Codable {
+    let jobs: [QueueEntry]
+    let paused: Bool
+}
+
+struct QueueEntry: Codable, Identifiable, Equatable {
     let jobId: String
     let jobType: String
     let priority: String

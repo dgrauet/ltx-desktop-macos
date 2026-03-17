@@ -63,7 +63,7 @@ def add_entry(
         job_id: Unique job identifier.
         prompt: The text prompt used for generation.
         output_path: Absolute path to the output video file.
-        duration_seconds: Wall-clock generation time in seconds.
+        duration_seconds: Ignored — video duration is computed from num_frames/fps.
         width: Output video width in pixels.
         height: Output video height in pixels.
         num_frames: Number of generated frames.
@@ -71,11 +71,13 @@ def add_entry(
         seed: Random seed used.
         generation_type: One of "t2v", "preview", "i2v".
     """
+    # duration_seconds in history = video duration, NOT wall-clock generation time
+    video_duration = round(num_frames / fps, 2) if fps > 0 else 0.0
     entry = {
         "job_id": job_id,
         "prompt": prompt,
         "output_path": output_path,
-        "duration_seconds": round(duration_seconds, 2),
+        "duration_seconds": video_duration,
         "width": width,
         "height": height,
         "num_frames": num_frames,

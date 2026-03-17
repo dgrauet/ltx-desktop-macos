@@ -265,12 +265,16 @@ async def run_mlx_generation(
     output_path: str,
     image: str | None = None,
     image_strength: float = 1.0,
+    image_frame_idx: int = 0,
     num_steps: int = 8,
     upscale: bool = False,
     ffmpeg_upscale: bool = False,
     preview_interval: int = 0,
     skip_bwe: bool = True,
     lora_args: list[str] | None = None,
+    retake_source: str | None = None,
+    retake_start_frame: int = 0,
+    retake_end_frame: int = -1,
     progress_callback: Callable[..., Awaitable[None]] | None = None,
     venv_python: str | None = None,
     model_repo_id: str | None = None,
@@ -296,6 +300,9 @@ async def run_mlx_generation(
         preview_interval: Emit preview frames every N diffusion steps (0=off).
         skip_bwe: If True, disable bandwidth extension (16kHz audio).
         lora_args: Optional LoRA arguments (--lora path:strength).
+        retake_source: Path to source video for retake (segment regeneration).
+        retake_start_frame: First latent frame index of retake region (inclusive).
+        retake_end_frame: Last latent frame index of retake region (exclusive, -1=last).
         progress_callback: Optional async callback invoked with
             ``(step, total_steps, stage, pct, status=None)`` where ``pct``
             is 0.0-1.0 and ``status`` is an optional human-readable stage label.
@@ -362,6 +369,20 @@ async def run_mlx_generation(
 
     if image is not None:
         cmd.extend(["--image", image, "--image-strength", str(image_strength)])
+        if image_frame_idx != 0:
+            cmd.extend(["--image-frame-idx", str(image_frame_idx)])
+
+    # Retake arguments (source video + temporal mask bounds in latent space)
+    if retake_source is not None:
+        cmd.extend([
+            "--retake-source", retake_source,
+            "--retake-start-frame", str(retake_start_frame),
+            "--retake-end-frame", str(retake_end_frame),
+        ])
+        log.info(
+            "Retake enabled: source=%s, latent frames [%d, %d)",
+            retake_source, retake_start_frame, retake_end_frame,
+        )
 
     # Append LoRA arguments (--lora path:strength, can be repeated)
     if lora_args:

@@ -7,10 +7,11 @@ using ffmpeg filter graphs. Music is ducked to 30% volume (20% with voiceover).
 from __future__ import annotations
 
 import logging
-import shutil
 import subprocess
 import uuid
 from pathlib import Path
+
+from engine.ffmpeg_utils import find_ffmpeg
 
 log = logging.getLogger(__name__)
 
@@ -28,23 +29,15 @@ _GENRE_FREQUENCIES: dict[str, int] = {
 
 
 def _find_ffmpeg() -> str:
-    """Locate the ffmpeg binary on the system.
+    """Locate the ffmpeg binary — delegates to shared utility.
 
     Returns:
         Absolute path to the ffmpeg executable.
 
     Raises:
-        RuntimeError: If ffmpeg cannot be found.
+        FileNotFoundError: If ffmpeg cannot be found.
     """
-    ffmpeg_bin = shutil.which("ffmpeg")
-    if not ffmpeg_bin:
-        for candidate in ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"]:
-            if Path(candidate).exists():
-                ffmpeg_bin = candidate
-                break
-    if not ffmpeg_bin:
-        raise RuntimeError("ffmpeg not found. Install with: brew install ffmpeg")
-    return ffmpeg_bin
+    return find_ffmpeg()
 
 
 class AudioMixer:
@@ -75,14 +68,15 @@ class AudioMixer:
         music_path: str | None = None,
         music_volume: float = 0.3,
         tts_volume: float = 1.0,
+        video_audio_volume: float = 1.0,
         output_path: str | None = None,
     ) -> str:
         """Mix audio tracks onto a video and write the result to a new MP4.
 
-        The original video audio is always included. TTS and music are
-        optional additional inputs. When both TTS and music are supplied,
-        music is ducked to 0.2 (rather than the default music_volume) so
-        that speech remains intelligible.
+        The original video audio is always included (at video_audio_volume).
+        TTS and music are optional additional inputs. When both TTS and
+        music are supplied, music is ducked to 0.2 (rather than the default
+        music_volume) so that speech remains intelligible.
 
         Args:
             video_path: Absolute path to the source MP4.
@@ -90,6 +84,8 @@ class AudioMixer:
             music_path: Optional absolute path to a background music file.
             music_volume: Base music volume (0.0–1.0). Defaults to 0.3.
             tts_volume: TTS volume (0.0–1.0). Defaults to 1.0.
+            video_audio_volume: Volume for the original video audio
+                (0.0–1.0). Defaults to 1.0.
             output_path: Where to write the mixed MP4. Defaults to a
                 timestamped file in OUTPUT_DIR.
 
@@ -110,8 +106,14 @@ class AudioMixer:
         # Build input list and filter graph incrementally.
         # Input 0 is always the video (carries the original audio on stream [0:a]).
         inputs: list[str] = ["-i", video_path]
-        audio_labels: list[str] = ["[0:a]"]
         filter_parts: list[str] = []
+
+        # Apply volume scaling to video audio if not full volume
+        if video_audio_volume < 1.0 - 1e-4:
+            filter_parts.append(f"[0:a]volume={video_audio_volume:.4f}[vid_scaled]")
+            audio_labels: list[str] = ["[vid_scaled]"]
+        else:
+            audio_labels: list[str] = ["[0:a]"]
 
         input_index = 1
 

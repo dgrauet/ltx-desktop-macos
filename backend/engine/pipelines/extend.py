@@ -1,33 +1,34 @@
-"""Extend pipeline — extend a video forward or backward from its last/first frame.
+"""Extend pipeline — extend a video forward or backward from its boundary frame.
 
-Sprint 3: stubbed inference that produces real MP4 files via ffmpeg.
-Real MLX ExtendPipeline inference will replace the stubs in a later sprint.
+Extend is implemented as I2V generation conditioned on the boundary frame:
+- Forward: extract last frame of source -> I2V at frame_idx=0 -> concat source + extension
+- Backward: extract first frame of source -> I2V at frame_idx=last -> concat extension + source
 
-Architecture note: each extension is a full diffusion pass conditioned on
-the last N frames of the source video (I2V-conditioned overlap). Segments
-are blended with linear alpha in the overlap region. See CLAUDE.md for the
-full chunked generation strategy.
+Uses the same two-subprocess architecture as I2V (text encoding + generation).
 """
 
 from __future__ import annotations
 
-import asyncio
 import inspect
 import logging
 import shutil
 import subprocess
+import tempfile
 import time
 import uuid
 from pathlib import Path
-from typing import Callable, Literal
+from typing import Awaitable, Callable, Literal
 
+from engine.ffmpeg_utils import find_ffmpeg, find_ffprobe, has_audio_stream, probe_video_info
 from engine.memory_manager import (
     aggressive_cleanup,
+    build_memory_stats_from_subprocess,
     get_memory_stats,
     increment_generation_count,
     periodic_reload_check,
     reset_peak_memory,
 )
+from engine.mlx_runner import run_mlx_generation
 from engine.model_manager import ModelManager
 from engine.pipelines.text_to_video import GenerationResult
 
@@ -37,12 +38,162 @@ log = logging.getLogger(__name__)
 OUTPUT_DIR = Path.home() / ".ltx-desktop" / "outputs" / "extensions"
 
 
-class ExtendPipeline:
-    """Extends a video forward or backward using MLX (stubbed for Sprint 3).
+def _find_ffmpeg() -> str:
+    """Find ffmpeg binary — delegates to shared utility."""
+    return find_ffmpeg()
 
-    Each extension is generated as a complete diffusion pass conditioned on
-    the boundary frames of the source video, then blended and concatenated
-    with the original.
+
+def _find_ffprobe() -> str:
+    """Find ffprobe binary — delegates to shared utility."""
+    return find_ffprobe()
+
+
+def _extract_boundary_frame(
+    video_path: str,
+    direction: str,
+    output_path: str,
+) -> None:
+    """Extract the boundary frame from a video using ffmpeg.
+
+    For forward extend, extracts the last frame.
+    For backward extend, extracts the first frame.
+
+    Args:
+        video_path: Path to the source video.
+        direction: "forward" (last frame) or "backward" (first frame).
+        output_path: Where to save the extracted frame as PNG.
+    """
+    ffmpeg_bin = _find_ffmpeg()
+
+    if direction == "backward":
+        # Extract first frame
+        cmd = [
+            ffmpeg_bin, "-y",
+            "-i", video_path,
+            "-vframes", "1",
+            "-q:v", "1",
+            output_path,
+        ]
+    else:
+        # Extract last frame: seek to 1s before end, then grab the first
+        # frame from that point.  -sseof -0.1 is too tight and produces
+        # empty output on many codecs; -1 is safe for any video >= 1s.
+        cmd = [
+            ffmpeg_bin, "-y",
+            "-sseof", "-1",
+            "-i", video_path,
+            "-vframes", "1",
+            "-q:v", "1",
+            output_path,
+        ]
+
+    log.info("Extracting boundary frame (%s): %s", direction, " ".join(cmd))
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"Failed to extract boundary frame: {result.stderr[:500]}"
+        )
+
+    if not Path(output_path).exists():
+        raise RuntimeError(
+            f"Boundary frame extraction produced no output: {output_path}"
+        )
+
+
+def _concatenate_videos(
+    first_path: str,
+    second_path: str,
+    output_path: str,
+    fps: int,
+) -> None:
+    """Concatenate two videos using ffmpeg re-encoding for consistency.
+
+    Re-encodes both inputs to ensure matching codec/resolution/fps.
+
+    Args:
+        first_path: Path to the first video (plays first).
+        second_path: Path to the second video (plays after).
+        output_path: Where to write the concatenated output.
+        fps: Target frames per second.
+    """
+    ffmpeg_bin = _find_ffmpeg()
+
+    # Use the concat filter for reliable concatenation with re-encoding.
+    # This handles potential codec/resolution mismatches between source and
+    # generated extension.
+    cmd = [
+        ffmpeg_bin, "-y",
+        "-i", first_path,
+        "-i", second_path,
+        "-filter_complex",
+        "[0:v][1:v]concat=n=2:v=1:a=0[outv]",
+        "-map", "[outv]",
+        "-c:v", "libx264",
+        "-crf", "18",
+        "-preset", "medium",
+        "-pix_fmt", "yuv420p",
+        "-r", str(fps),
+        output_path,
+    ]
+
+    # If both inputs have audio, concatenate audio too
+    has_audio_0 = _has_audio_stream(first_path)
+    has_audio_1 = _has_audio_stream(second_path)
+
+    if has_audio_0 and has_audio_1:
+        cmd = [
+            ffmpeg_bin, "-y",
+            "-i", first_path,
+            "-i", second_path,
+            "-filter_complex",
+            "[0:v][0:a][1:v][1:a]concat=n=2:v=1:a=1[outv][outa]",
+            "-map", "[outv]",
+            "-map", "[outa]",
+            "-c:v", "libx264",
+            "-crf", "18",
+            "-preset", "medium",
+            "-pix_fmt", "yuv420p",
+            "-c:a", "aac",
+            "-b:a", "192k",
+            "-r", str(fps),
+            output_path,
+        ]
+    elif has_audio_0:
+        # Only first has audio — take video from both, audio from first only
+        cmd = [
+            ffmpeg_bin, "-y",
+            "-i", first_path,
+            "-i", second_path,
+            "-filter_complex",
+            "[0:v][1:v]concat=n=2:v=1:a=0[outv]",
+            "-map", "[outv]",
+            "-map", "0:a?",
+            "-c:v", "libx264",
+            "-crf", "18",
+            "-preset", "medium",
+            "-pix_fmt", "yuv420p",
+            "-c:a", "aac",
+            "-b:a", "192k",
+            "-r", str(fps),
+            output_path,
+        ]
+
+    log.info("Concatenating videos: %s + %s -> %s", first_path, second_path, output_path)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    if result.returncode != 0:
+        raise RuntimeError(f"Video concatenation failed: {result.stderr[:500]}")
+
+
+def _has_audio_stream(video_path: str) -> bool:
+    """Check if a video file contains an audio stream — delegates to shared utility."""
+    return has_audio_stream(video_path)
+
+
+class ExtendPipeline:
+    """Extends a video forward or backward using MLX I2V generation.
+
+    Each extension generates new frames conditioned on the boundary frame
+    of the source video, then concatenates the result.
     """
 
     def __init__(self, model_manager: ModelManager) -> None:
@@ -61,10 +212,13 @@ class ExtendPipeline:
     ) -> GenerationResult:
         """Extend a video forward or backward.
 
-        For "forward" extension: conditions on the last N frames of the source
-        and generates new frames appended to the end.
-        For "backward" extension: conditions on the first N frames of the source
-        and generates new frames prepended to the beginning.
+        For "forward" extension: extracts the last frame of the source video,
+        generates new frames conditioned on it (I2V at frame_idx=0), and
+        concatenates source + extension.
+
+        For "backward" extension: extracts the first frame of the source video,
+        generates new frames conditioned on it (I2V at last frame), and
+        concatenates extension + source.
 
         Args:
             source_video_path: Absolute path to the source video file.
@@ -81,16 +235,22 @@ class ExtendPipeline:
         Returns:
             GenerationResult with output path, timing, and memory stats.
         """
+        # Validate source video
+        src_path = Path(source_video_path)
+        if not src_path.exists():
+            raise FileNotFoundError(f"Source video not found: {source_video_path}")
+
         job_id = str(uuid.uuid4())[:8]
         stages: dict[str, float] = {}
         start_time = time.monotonic()
 
         async def _notify(
-            step: int, total: int, pct: float, frame: str | None = None
+            step: int, total: int, pct: float, frame: str | None = None,
+            *, status: str | None = None,
         ) -> None:
             if not progress_callback:
                 return
-            result = progress_callback(step, total, pct, frame)
+            result = progress_callback(step, total, pct, frame, status=status)
             if inspect.isawaitable(result):
                 await result
 
@@ -100,214 +260,107 @@ class ExtendPipeline:
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         output_path = OUTPUT_DIR / f"extend_{job_id}.mp4"
 
-        total_stages = 5
-        current_stage = 0
-
-        extension_duration = extension_frames / fps
-        log.info(
-            "[%s] Extend: source=%r direction=%s frames=%d (%.2fs) prompt=%r",
-            job_id,
-            source_video_path,
-            direction,
-            extension_frames,
-            extension_duration,
-            prompt[:80],
-        )
-
-        # Stage 1: Source analysis — probe dimensions and duration
-        log.info("[%s] Stage 1: Source video analysis", job_id)
+        # --- Stage 1: Probe source video ---
+        await _notify(0, 0, 0.01, status="Analyzing source video")
         t0 = time.monotonic()
-        source_width, source_height, source_duration = _probe_video_info(source_video_path)
+        source_width, source_height, source_duration = probe_video_info(source_video_path)
         log.info(
-            "[%s] Source: %dx%d, %.2fs @ %dfps",
-            job_id,
-            source_width,
-            source_height,
-            source_duration,
-            fps,
+            "[%s] Source: %dx%d, %.2fs @ %dfps, direction=%s",
+            job_id, source_width, source_height, source_duration, fps, direction,
         )
         stages["source_analysis"] = time.monotonic() - t0
-        aggressive_cleanup()
-        current_stage += 1
-        await _notify(current_stage, total_stages, current_stage / total_stages)
 
-        # Stage 2: Text encoding
-        log.info("[%s] Stage 2: Text encoding — prompt=%r", job_id, prompt[:80])
+        # --- Stage 2: Extract boundary frame ---
+        await _notify(0, 0, 0.02, status="Extracting boundary frame")
         t0 = time.monotonic()
-        await asyncio.sleep(0.1)  # Stub: simulate text encoding
-        stages["text_encoding"] = time.monotonic() - t0
-        aggressive_cleanup()
-        current_stage += 1
-        await _notify(current_stage, total_stages, current_stage / total_stages)
+        tmp_dir = tempfile.mkdtemp(prefix="ltx_extend_")
+        boundary_frame_path = str(Path(tmp_dir) / "boundary_frame.png")
 
-        # Stage 3: Diffusion (extension segment, conditioned on boundary frames)
+        _extract_boundary_frame(source_video_path, direction, boundary_frame_path)
+        log.info("[%s] Boundary frame extracted: %s", job_id, boundary_frame_path)
+        stages["frame_extraction"] = time.monotonic() - t0
+        aggressive_cleanup()
+
+        # --- Stage 3: Generate extension via I2V ---
+        # For forward: condition on frame 0 (default I2V behavior)
+        # For backward: condition on the last frame of the new generation
+        image_frame_idx = 0 if direction == "forward" else -1
+
+        extension_path = str(Path(tmp_dir) / "extension.mp4")
+
+        # Adapt mlx_runner progress to pipeline progress_callback format
+        async def _progress_adapter(
+            step: int, total_steps: int, stage: int, pct: float,
+            *, status: str | None = None, preview_frame: str | None = None,
+        ) -> None:
+            # Scale inner progress (0.0-1.0) to overall pipeline range (0.05-0.90)
+            scaled_pct = 0.05 + pct * 0.80
+            label = status or "Generating extension"
+            await _notify(step, total_steps, scaled_pct, preview_frame, status=label)
+
         log.info(
-            "[%s] Stage 3: Diffusion — %d steps (direction=%s, conditioned on boundary frames)",
-            job_id,
-            steps,
-            direction,
+            "[%s] Starting I2V extension: %dx%d, %d frames, frame_idx=%s",
+            job_id, source_width, source_height, extension_frames,
+            "last" if image_frame_idx == -1 else image_frame_idx,
         )
         t0 = time.monotonic()
-        for step in range(steps):
-            await asyncio.sleep(0.05)  # Stub: simulate denoising step
-            pct = (current_stage + (step + 1) / steps) / total_stages
-            await _notify(step + 1, steps, pct)
-        stages["diffusion"] = time.monotonic() - t0
-        aggressive_cleanup()
-        current_stage += 1
 
-        # Stage 4: VAE decode → stub extension clip via ffmpeg
-        log.info("[%s] Stage 4: VAE decode → ffmpeg (extension segment)", job_id)
-        t0 = time.monotonic()
-        _generate_stub_extension_video(
-            source_video_path=source_video_path,
-            output_path=output_path,
-            width=source_width,
+        gen_result = await run_mlx_generation(
+            prompt=prompt,
             height=source_height,
-            source_duration=source_duration,
-            extension_duration=extension_duration,
-            direction=direction,
+            width=source_width,
+            num_frames=extension_frames,
+            seed=seed,
             fps=fps,
+            output_path=extension_path,
+            image=boundary_frame_path,
+            image_strength=1.0,
+            image_frame_idx=image_frame_idx,
+            num_steps=steps,
+            preview_interval=2,
+            progress_callback=_progress_adapter,
         )
-        stages["vae_decode"] = time.monotonic() - t0
-        aggressive_cleanup()
-        current_stage += 1
-        await _notify(current_stage, total_stages, current_stage / total_stages)
 
-        # Stage 5: Concatenate extension with original (overlap blend)
-        log.info(
-            "[%s] Stage 5: Concatenate extension with original (direction=%s)", job_id, direction
-        )
-        t0 = time.monotonic()
-        await asyncio.sleep(0.05)  # Stub: simulate concat/blend
-        stages["concat"] = time.monotonic() - t0
+        stages["generation"] = time.monotonic() - t0
         aggressive_cleanup()
-        current_stage += 1
-        await _notify(current_stage, total_stages, 1.0)
+        log.info("[%s] Extension generated: %s", job_id, extension_path)
+
+        # --- Stage 4: Concatenate source + extension ---
+        await _notify(0, 0, 0.92, status="Concatenating videos")
+        t0 = time.monotonic()
+
+        if direction == "forward":
+            # source video first, then extension
+            _concatenate_videos(source_video_path, extension_path, str(output_path), fps)
+        else:
+            # extension first, then source video
+            _concatenate_videos(extension_path, source_video_path, str(output_path), fps)
+
+        stages["concatenation"] = time.monotonic() - t0
+        aggressive_cleanup()
+        log.info("[%s] Videos concatenated: %s", job_id, output_path)
+
+        # Clean up temp files
+        try:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        except OSError:
+            pass
+
+        await _notify(0, 0, 1.0, status="Complete")
 
         total_duration = time.monotonic() - start_time
-        log.info("[%s] Extension complete in %.2fs → %s", job_id, total_duration, output_path)
+        log.info("[%s] Extension complete in %.2fs -> %s", job_id, total_duration, output_path)
 
         increment_generation_count()
         periodic_reload_check(self._model_manager)
+
+        subprocess_memory = gen_result.get("subprocess_memory", {})
+        memory_after = build_memory_stats_from_subprocess(subprocess_memory)
 
         return GenerationResult(
             job_id=job_id,
             output_path=str(output_path),
             duration_seconds=total_duration,
-            memory_after=get_memory_stats(),
+            memory_after=memory_after,
             stages=stages,
         )
-
-
-def _probe_video_info(video_path: str) -> tuple[int, int, float]:
-    """Probe a video file for width, height, and duration using ffprobe.
-
-    Args:
-        video_path: Absolute path to the video file.
-
-    Returns:
-        Tuple of (width, height, duration_seconds). Falls back to
-        (768, 512, 4.0) if probing fails.
-    """
-    ffprobe_bin = shutil.which("ffprobe")
-    if not ffprobe_bin:
-        for p in ["/opt/homebrew/bin/ffprobe", "/usr/local/bin/ffprobe"]:
-            if Path(p).exists():
-                ffprobe_bin = p
-                break
-    if not ffprobe_bin or not Path(video_path).exists():
-        log.warning("ffprobe not found or source missing — using defaults 768×512 @ 4.0s")
-        return 768, 512, 4.0
-
-    cmd = [
-        ffprobe_bin,
-        "-v", "error",
-        "-select_streams", "v:0",
-        "-show_entries", "stream=width,height,duration",
-        "-of", "csv=p=0",
-        video_path,
-    ]
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-        if result.returncode == 0 and result.stdout.strip():
-            parts = result.stdout.strip().split(",")
-            width = int(parts[0])
-            height = int(parts[1])
-            duration = float(parts[2]) if len(parts) > 2 else 4.0
-            return width, height, duration
-    except Exception:
-        log.warning("ffprobe failed to read info from %s", video_path)
-    return 768, 512, 4.0
-
-
-def _generate_stub_extension_video(
-    source_video_path: str,
-    output_path: Path,
-    width: int,
-    height: int,
-    source_duration: float,
-    extension_duration: float,
-    direction: str,
-    fps: int,
-) -> None:
-    """Generate a placeholder extended MP4.
-
-    In production this will be replaced by:
-    1. Streaming VAE decode of the extension segment piped to ffmpeg.
-    2. Linear alpha blend in the overlap region between source and extension.
-    3. ffmpeg concat filter to produce the final output.
-
-    For now we produce a solid-colour clip representing the extension segment
-    concatenated with the original video via ffmpeg's concat filter.
-
-    Args:
-        source_video_path: Absolute path to the source video.
-        output_path: Where to write the extended output MP4.
-        width: Video width.
-        height: Video height.
-        source_duration: Duration of the source video in seconds.
-        extension_duration: Duration of the new extension in seconds.
-        direction: "forward" (append) or "backward" (prepend).
-        fps: Frames per second.
-    """
-    ffmpeg_bin = shutil.which("ffmpeg")
-    if not ffmpeg_bin:
-        for p in ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"]:
-            if Path(p).exists():
-                ffmpeg_bin = p
-                break
-    if not ffmpeg_bin:
-        raise RuntimeError("ffmpeg not found. Install with: brew install ffmpeg")
-
-    total_duration = source_duration + extension_duration
-
-    # Stub: produce a solid-colour clip of the full extended duration.
-    # Colour: dark teal for forward, dark purple for backward — visually
-    # distinguishable during development.
-    stub_colour = "0x1a2e2e" if direction == "forward" else "0x2e1a2e"
-
-    cmd = [
-        ffmpeg_bin,
-        "-y",
-        "-f", "lavfi",
-        "-i", f"color=c={stub_colour}:s={width}x{height}:d={total_duration:.3f}:r={fps}",
-        "-f", "lavfi",
-        "-i", f"sine=frequency=550:duration={total_duration:.3f}:sample_rate=44100",
-        "-c:v", "libx264",
-        "-preset", "ultrafast",
-        "-pix_fmt", "yuv420p",
-        "-c:a", "aac",
-        "-b:a", "128k",
-        "-shortest",
-        str(output_path),
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-    if result.returncode != 0:
-        raise RuntimeError(f"ffmpeg failed: {result.stderr[:500]}")
-    log.info(
-        "Stub extension video created (%s, %.2fs total): %s",
-        direction,
-        total_duration,
-        output_path,
-    )

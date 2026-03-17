@@ -20,10 +20,11 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
-from engine.memory_manager import aggressive_cleanup, get_memory_stats
+from engine.memory_manager import aggressive_cleanup, get_memory_stats, memory_pressure_monitor
 from engine.model_manager import ModelManager
 from engine.model_download_manager import ModelDownloadManager
 import history_store
+import preset_manager
 from engine.pipelines.text_to_video import TextToVideoPipeline
 from engine.pipelines.preview import PreviewPipeline
 from engine.pipelines.image_to_video import ImageToVideoPipeline
@@ -106,6 +107,7 @@ class T2VRequest(BaseModel):
     guidance_scale: float = Field(default=1.0, ge=0.0, le=20.0)
     fps: int = Field(default=24, ge=1, le=60)
     upscale: bool = Field(default=False, description="2x spatial upscale via latent upsampler")
+    lora_ids: list[str] = Field(default=[], description="LoRA IDs to apply (empty = use active LoRAs)")
 
 
 class PreviewRequest(BaseModel):
@@ -116,6 +118,7 @@ class PreviewRequest(BaseModel):
     source_image_path: str | None = Field(default=None)
     image_strength: float = Field(default=1.0, ge=0.0, le=1.0)
     upscale: bool = Field(default=False, description="2x spatial upscale (384x256 -> 768x512)")
+    lora_ids: list[str] = Field(default=[], description="LoRA IDs to apply (empty = use active LoRAs)")
 
 
 class I2VRequest(BaseModel):
@@ -131,6 +134,7 @@ class I2VRequest(BaseModel):
     fps: int = Field(default=24, ge=1, le=60)
     image_strength: float = Field(default=1.0, ge=0.0, le=1.0)
     upscale: bool = Field(default=False, description="2x spatial upscale via latent upsampler")
+    lora_ids: list[str] = Field(default=[], description="LoRA IDs to apply (empty = use active LoRAs)")
 
 
 class EnhanceRequest(BaseModel):
@@ -191,6 +195,34 @@ def _resolve_seed(seed: int) -> int:
     return seed
 
 
+
+
+def _resolve_lora_args(lora_ids: list[str]) -> list[str] | None:
+    """Resolve LoRA IDs from request to CLI args for the generation subprocess.
+
+    If lora_ids is non-empty, look up each ID in the lora_manager and build
+    CLI args from their paths and strengths. If empty, fall back to whatever
+    LoRAs are globally active in the lora_manager.
+
+    Args:
+        lora_ids: List of LoRA ID slugs from the generation request.
+
+    Returns:
+        CLI args list like ["--lora", "path:strength", ...] or None if no LoRAs.
+    """
+    if lora_ids:
+        args: list[str] = []
+        all_loras = {info.id: info for info in lora_manager.list_loras()}
+        for lid in lora_ids:
+            info = all_loras.get(lid)
+            if info and info.compatible and info.path:
+                strength = info.strength if info.loaded else 0.7
+                args.extend(["--lora", f"{info.path}:{strength}"])
+            else:
+                log.warning("LoRA ID %r not found or incompatible — skipping", lid)
+        return args or None
+    return lora_manager.get_active_lora_args() or None
+
 class HealthResponse(BaseModel):
     """Health check response."""
     status: str
@@ -214,6 +246,21 @@ class MemoryResponse(BaseModel):
     system_available_gb: float
     generation_count_since_reload: int
     next_reload_in: int
+
+
+class ResolutionLimit(BaseModel):
+    """A resolution with its maximum recommended frames."""
+    width: int
+    height: int
+    max_frames: int
+
+
+class HardwareLimitsResponse(BaseModel):
+    """Hardware-based generation limits (recommendations, not hard blocks)."""
+    total_ram_gb: int
+    max_resolution: ResolutionLimit
+    resolution_limits: list[ResolutionLimit]
+    warnings: list[str]
 
 
 class LoRAInfoResponse(BaseModel):
@@ -264,6 +311,7 @@ class MixRequest(BaseModel):
     music_path: str | None = None
     music_volume: float = Field(default=0.3, ge=0.0, le=1.0)
     tts_volume: float = Field(default=1.0, ge=0.0, le=1.0)
+    video_audio_volume: float = Field(default=1.0, ge=0.0, le=1.0)
 
 
 class ExportVideoRequest(BaseModel):
@@ -343,6 +391,112 @@ async def memory_stats():
     """Real-time Metal memory statistics."""
     stats = get_memory_stats()
     return MemoryResponse(**stats)
+
+
+@app.get("/api/v1/system/memory-pressure")
+async def memory_pressure():
+    """Check memory pressure and return current state with any actions taken."""
+    result = memory_pressure_monitor.check_pressure(job_queue)
+    return result
+
+
+class MemoryPressureSettingsRequest(BaseModel):
+    """Request to update memory pressure monitor settings."""
+    auto_pause_enabled: bool | None = None
+    auto_cleanup_enabled: bool | None = None
+
+
+@app.post("/api/v1/system/memory-pressure/settings")
+async def update_memory_pressure_settings(req: MemoryPressureSettingsRequest):
+    """Toggle auto-pause and auto-cleanup settings."""
+    if req.auto_pause_enabled is not None:
+        memory_pressure_monitor.auto_pause_enabled = req.auto_pause_enabled
+    if req.auto_cleanup_enabled is not None:
+        memory_pressure_monitor.auto_cleanup_enabled = req.auto_cleanup_enabled
+    return memory_pressure_monitor.get_state()
+
+
+@app.post("/api/v1/system/memory-pressure/resume")
+async def resume_memory_pressure_pause():
+    """Manually resume a queue paused by memory pressure."""
+    resumed = memory_pressure_monitor.manual_resume(job_queue)
+    return {"resumed": resumed, **memory_pressure_monitor.get_state()}
+
+
+@app.get("/api/v1/system/hardware-limits", response_model=HardwareLimitsResponse)
+async def hardware_limits():
+    """Return recommended resolution/frame limits based on detected RAM.
+
+    These are recommendations, not hard blocks. Users can override them.
+    """
+    ram_total_gb = 0
+    try:
+        ram_bytes = int(subprocess.run(
+            ["sysctl", "-n", "hw.memsize"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip())
+        ram_total_gb = ram_bytes // (1024**3)
+    except Exception:
+        pass
+
+    warnings: list[str] = []
+    resolution_limits: list[ResolutionLimit] = []
+
+    if ram_total_gb < 32:
+        warnings.append(
+            "Less than 32GB RAM detected — very limited capability. "
+            "Expect slow generation and possible out-of-memory errors."
+        )
+        resolution_limits = [
+            ResolutionLimit(width=384, height=256, max_frames=25),
+            ResolutionLimit(width=256, height=384, max_frames=25),
+        ]
+        max_resolution = ResolutionLimit(width=384, height=256, max_frames=25)
+
+    elif ram_total_gb < 48:
+        # 32GB tier — tested and verified
+        resolution_limits = [
+            ResolutionLimit(width=384, height=256, max_frames=97),
+            ResolutionLimit(width=256, height=384, max_frames=97),
+            ResolutionLimit(width=768, height=512, max_frames=97),
+            ResolutionLimit(width=512, height=768, max_frames=97),
+            ResolutionLimit(width=1280, height=704, max_frames=49),
+            ResolutionLimit(width=704, height=1280, max_frames=49),
+        ]
+        max_resolution = ResolutionLimit(width=1280, height=704, max_frames=49)
+
+    elif ram_total_gb < 64:
+        # 48GB tier
+        resolution_limits = [
+            ResolutionLimit(width=384, height=256, max_frames=97),
+            ResolutionLimit(width=256, height=384, max_frames=97),
+            ResolutionLimit(width=768, height=512, max_frames=97),
+            ResolutionLimit(width=512, height=768, max_frames=97),
+            ResolutionLimit(width=1280, height=704, max_frames=97),
+            ResolutionLimit(width=704, height=1280, max_frames=97),
+        ]
+        max_resolution = ResolutionLimit(width=1280, height=704, max_frames=97)
+
+    else:
+        # 64GB+ tier — Full HD should fit
+        resolution_limits = [
+            ResolutionLimit(width=384, height=256, max_frames=97),
+            ResolutionLimit(width=256, height=384, max_frames=97),
+            ResolutionLimit(width=768, height=512, max_frames=97),
+            ResolutionLimit(width=512, height=768, max_frames=97),
+            ResolutionLimit(width=1280, height=704, max_frames=97),
+            ResolutionLimit(width=704, height=1280, max_frames=97),
+            ResolutionLimit(width=1920, height=1080, max_frames=97),
+            ResolutionLimit(width=1080, height=1920, max_frames=97),
+        ]
+        max_resolution = ResolutionLimit(width=1920, height=1080, max_frames=97)
+
+    return HardwareLimitsResponse(
+        total_ram_gb=ram_total_gb,
+        max_resolution=max_resolution,
+        resolution_limits=resolution_limits,
+        warnings=warnings,
+    )
 
 
 # --- Model management endpoints ---
@@ -517,6 +671,20 @@ _PRIORITY_MAP: dict[str, Priority] = {
 
 # --- Generation endpoints ---
 
+
+def _check_queue_paused() -> None:
+    """Check if the queue is paused by memory pressure and reject new jobs.
+
+    Also triggers a memory pressure check before accepting the job.
+    """
+    memory_pressure_monitor.check_pressure(job_queue)
+    if job_queue.is_paused:
+        raise HTTPException(
+            status_code=503,
+            detail="Queue is paused due to memory pressure. Wait for memory to recover or manually resume.",
+        )
+
+
 @app.post("/api/v1/generate/text-to-video", response_model=QueueSubmitResponse)
 async def generate_t2v(req: T2VRequest, priority: str = "normal"):
     """Submit a text-to-video generation job to the queue.
@@ -525,6 +693,7 @@ async def generate_t2v(req: T2VRequest, priority: str = "normal"):
         req: Generation parameters.
         priority: Job priority (high, normal, low). Default: normal.
     """
+    _check_queue_paused()
     job_id = str(uuid.uuid4())[:8]
     pri = _PRIORITY_MAP.get(priority, Priority.NORMAL)
     jobs[job_id] = {
@@ -551,6 +720,7 @@ async def generate_preview(req: PreviewRequest):
 
     Preview jobs always get HIGH priority and auto-cancel previous previews.
     """
+    _check_queue_paused()
     job_id = str(uuid.uuid4())[:8]
     jobs[job_id] = {
         "status": "queued", "progress": 0.0, "result": None, "error": None,
@@ -578,6 +748,7 @@ async def generate_i2v(req: I2VRequest, priority: str = "normal"):
         req: Generation parameters.
         priority: Job priority (high, normal, low). Default: normal.
     """
+    _check_queue_paused()
     job_id = str(uuid.uuid4())[:8]
     pri = _PRIORITY_MAP.get(priority, Priority.NORMAL)
     jobs[job_id] = {
@@ -618,7 +789,7 @@ async def _run_t2v(job_id: str, req: T2VRequest) -> None:
             guidance_scale=req.guidance_scale,
             fps=req.fps,
             upscale=req.upscale,
-            lora_args=lora_manager.get_active_lora_args() or None,
+            lora_args=_resolve_lora_args(req.lora_ids),
             model_repo_id=selected_video_model,
             progress_callback=progress_cb,
         )
@@ -652,6 +823,8 @@ async def _run_t2v(job_id: str, req: T2VRequest) -> None:
         jobs[job_id]["error"] = str(e)
         log.error("Job %s failed: %s", job_id, e)
         await _broadcast_progress(job_id, 0, 0, 0.0, error=str(e))
+    finally:
+        memory_pressure_monitor.check_pressure(job_queue)
 
 
 async def _run_preview(job_id: str, req: PreviewRequest) -> None:
@@ -671,7 +844,7 @@ async def _run_preview(job_id: str, req: PreviewRequest) -> None:
             image=req.source_image_path,
             image_strength=req.image_strength,
             upscale=req.upscale,
-            lora_args=lora_manager.get_active_lora_args() or None,
+            lora_args=_resolve_lora_args(req.lora_ids),
             model_repo_id=selected_video_model,
             progress_callback=progress_cb,
         )
@@ -705,6 +878,8 @@ async def _run_preview(job_id: str, req: PreviewRequest) -> None:
         jobs[job_id]["error"] = str(e)
         log.error("Preview %s failed: %s", job_id, e)
         await _broadcast_progress(job_id, 0, 0, 0.0, error=str(e))
+    finally:
+        memory_pressure_monitor.check_pressure(job_queue)
 
 
 async def _run_i2v(job_id: str, req: I2VRequest) -> None:
@@ -730,7 +905,7 @@ async def _run_i2v(job_id: str, req: I2VRequest) -> None:
             image_strength=req.image_strength,
             model_repo_id=selected_video_model,
             upscale=req.upscale,
-            lora_args=lora_manager.get_active_lora_args() or None,
+            lora_args=_resolve_lora_args(req.lora_ids),
             progress_callback=progress_cb,
         )
         jobs[job_id]["status"] = "completed"
@@ -763,6 +938,8 @@ async def _run_i2v(job_id: str, req: I2VRequest) -> None:
         jobs[job_id]["error"] = str(e)
         log.error("I2V %s failed: %s", job_id, e)
         await _broadcast_progress(job_id, 0, 0, 0.0, error=str(e))
+    finally:
+        memory_pressure_monitor.check_pressure(job_queue)
 
 
 @app.post("/api/v1/generate/retake", response_model=QueueSubmitResponse)
@@ -828,6 +1005,7 @@ async def _run_retake(job_id: str, req: RetakeRequest) -> None:
             steps=req.steps,
             seed=_resolve_seed(req.seed),
             fps=req.fps,
+            model_repo_id=selected_video_model,
             progress_callback=progress_cb,
         )
         jobs[job_id]["status"] = "completed"
@@ -841,6 +1019,26 @@ async def _run_retake(job_id: str, req: RetakeRequest) -> None:
         }
         await _broadcast_progress(job_id, 0, 0, 1.0, done=True)
         log.info("Retake %s completed in %.2fs", job_id, result.duration_seconds)
+
+        try:
+            from engine.ffmpeg_utils import probe_video_info
+            w, h, dur = probe_video_info(result.output_path)
+            total_frames = round(dur * req.fps)
+        except Exception:
+            w, h, total_frames = 0, 0, 0
+
+        history_store.add_entry(
+            job_id=job_id,
+            prompt=req.prompt,
+            output_path=result.output_path,
+            duration_seconds=result.duration_seconds,
+            width=w,
+            height=h,
+            num_frames=total_frames,
+            fps=req.fps,
+            seed=_resolve_seed(req.seed),
+            generation_type="retake",
+        )
 
     except Exception as e:
         jobs[job_id]["status"] = "failed"
@@ -879,6 +1077,27 @@ async def _run_extend(job_id: str, req: ExtendRequest) -> None:
         }
         await _broadcast_progress(job_id, 0, 0, 1.0, done=True)
         log.info("Extend %s completed in %.2fs", job_id, result.duration_seconds)
+
+        # Probe output for history entry
+        try:
+            from engine.ffmpeg_utils import probe_video_info
+            w, h, dur = probe_video_info(result.output_path)
+            total_frames = round(dur * req.fps)
+        except Exception:
+            w, h, total_frames = 0, 0, req.extension_frames
+
+        history_store.add_entry(
+            job_id=job_id,
+            prompt=req.prompt,
+            output_path=result.output_path,
+            duration_seconds=result.duration_seconds,
+            width=w,
+            height=h,
+            num_frames=total_frames,
+            fps=req.fps,
+            seed=_resolve_seed(req.seed),
+            generation_type="extend",
+        )
 
     except Exception as e:
         jobs[job_id]["status"] = "failed"
@@ -922,7 +1141,7 @@ async def list_queue():
     queue_state = job_queue.get_queue_state()
 
     # Enrich with progress from jobs dict
-    for item in queue_state:
+    for item in queue_state["jobs"]:
         jid = item["job_id"]
         if jid in jobs:
             item["progress"] = jobs[jid]["progress"]
@@ -993,7 +1212,7 @@ async def get_job(job_id: str):
     queued_job = job_queue.get_job(job_id)
     if queued_job is not None and queued_job.state == "queued":
         queue_state = job_queue.get_queue_state()
-        for item in queue_state:
+        for item in queue_state["jobs"]:
             if item["job_id"] == job_id:
                 result["position"] = item["position"]
                 result["eta_seconds"] = item.get("eta_seconds")
@@ -1023,6 +1242,40 @@ async def delete_history_entry(job_id: str):
     return {"success": True}
 
 
+# --- Preset endpoints ---
+
+
+class CreatePresetRequest(BaseModel):
+    """Request to create a new parameter preset."""
+    name: str = Field(..., min_length=1, max_length=100)
+    params: dict[str, Any] = Field(...)
+
+
+@app.get("/api/v1/presets")
+async def list_presets():
+    """Return all parameter presets (built-ins + user-created)."""
+    return preset_manager.list_presets()
+
+
+@app.post("/api/v1/presets")
+async def create_preset(req: CreatePresetRequest):
+    """Create a new user parameter preset."""
+    preset = preset_manager.create_preset(name=req.name, params=req.params)
+    return preset
+
+
+@app.delete("/api/v1/presets/{preset_id}")
+async def delete_preset(preset_id: str):
+    """Delete a user preset by ID. Built-in presets cannot be deleted."""
+    found = preset_manager.delete_preset(preset_id)
+    if not found:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Preset '{preset_id}' not found or is a built-in preset",
+        )
+    return {"success": True}
+
+
 # --- WebSocket progress ---
 
 @app.websocket("/ws/progress/{job_id}")
@@ -1046,7 +1299,7 @@ async def ws_progress(websocket: WebSocket, job_id: str):
             # Add position if queued
             queued_job = job_queue.get_job(job_id)
             if queued_job is not None and queued_job.state == "queued":
-                for item in job_queue.get_queue_state():
+                for item in job_queue.get_queue_state()["jobs"]:
                     if item["job_id"] == job_id:
                         msg["position"] = item["position"]
                         msg["eta_seconds"] = item.get("eta_seconds")
@@ -1192,6 +1445,7 @@ async def audio_mix(req: MixRequest):
             music_path=req.music_path,
             music_volume=req.music_volume,
             tts_volume=req.tts_volume,
+            video_audio_volume=req.video_audio_volume,
         ),
     )
     return PathResponse(output_path=result)
