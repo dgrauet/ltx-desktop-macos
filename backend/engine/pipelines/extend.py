@@ -17,13 +17,12 @@ import tempfile
 import time
 import uuid
 from pathlib import Path
-from typing import Awaitable, Callable, Literal
+from typing import Callable, Literal
 
-from engine.ffmpeg_utils import find_ffmpeg, find_ffprobe, has_audio_stream, probe_video_info
+from engine.ffmpeg_utils import find_ffmpeg, has_audio_stream, probe_video_info
 from engine.memory_manager import (
     aggressive_cleanup,
     build_memory_stats_from_subprocess,
-    get_memory_stats,
     increment_generation_count,
     periodic_reload_check,
     reset_peak_memory,
@@ -37,15 +36,6 @@ log = logging.getLogger(__name__)
 # Output directory for extension results
 OUTPUT_DIR = Path.home() / ".ltx-desktop" / "outputs" / "extensions"
 
-
-def _find_ffmpeg() -> str:
-    """Find ffmpeg binary — delegates to shared utility."""
-    return find_ffmpeg()
-
-
-def _find_ffprobe() -> str:
-    """Find ffprobe binary — delegates to shared utility."""
-    return find_ffprobe()
 
 
 def _extract_boundary_frame(
@@ -63,7 +53,7 @@ def _extract_boundary_frame(
         direction: "forward" (last frame) or "backward" (first frame).
         output_path: Where to save the extracted frame as PNG.
     """
-    ffmpeg_bin = _find_ffmpeg()
+    ffmpeg_bin = find_ffmpeg()
 
     if direction == "backward":
         # Extract first frame
@@ -116,7 +106,7 @@ def _concatenate_videos(
         output_path: Where to write the concatenated output.
         fps: Target frames per second.
     """
-    ffmpeg_bin = _find_ffmpeg()
+    ffmpeg_bin = find_ffmpeg()
 
     # Use the concat filter for reliable concatenation with re-encoding.
     # This handles potential codec/resolution mismatches between source and
@@ -137,8 +127,8 @@ def _concatenate_videos(
     ]
 
     # If both inputs have audio, concatenate audio too
-    has_audio_0 = _has_audio_stream(first_path)
-    has_audio_1 = _has_audio_stream(second_path)
+    has_audio_0 = has_audio_stream(first_path)
+    has_audio_1 = has_audio_stream(second_path)
 
     if has_audio_0 and has_audio_1:
         cmd = [
@@ -183,10 +173,6 @@ def _concatenate_videos(
     if result.returncode != 0:
         raise RuntimeError(f"Video concatenation failed: {result.stderr[:500]}")
 
-
-def _has_audio_stream(video_path: str) -> bool:
-    """Check if a video file contains an audio stream — delegates to shared utility."""
-    return has_audio_stream(video_path)
 
 
 class ExtendPipeline:

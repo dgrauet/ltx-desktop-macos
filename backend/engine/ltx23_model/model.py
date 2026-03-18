@@ -536,10 +536,6 @@ class LTXModel(nn.Module):
             else:
                 self._audio_args_preprocessor = audio_simple_preprocessor
 
-    def set_teacache(self, teacache) -> None:
-        """Attach a TeaCacheMLX instance for block-level residual caching."""
-        self._teacache = teacache
-
     def set_step_info(self, step_idx: int, total_steps: int) -> None:
         """Set current denoising step info (called before each forward pass)."""
         self._step_idx = step_idx
@@ -550,52 +546,17 @@ class LTXModel(nn.Module):
         video_args: Optional[TransformerArgs] = None,
         audio_args: Optional[TransformerArgs] = None,
     ) -> Tuple[Optional[TransformerArgs], Optional[TransformerArgs]]:
-        """Process all transformer blocks with periodic materialization for memory.
-
-        When TeaCache is enabled, checks whether the modulated input has changed
-        enough to warrant recomputing all 48 blocks. If not, applies the cached
-        cumulative residual instead, saving significant compute.
-        """
-        # TeaCache: check if we can skip all blocks
-        teacache = getattr(self, "_teacache", None)
-        step_idx = getattr(self, "_step_idx", 0)
-        total_steps = getattr(self, "_total_steps", 1)
-
-        if teacache is not None and video_args is not None:
-            if teacache.should_skip_blocks(video_args.x, step_idx, total_steps):
-                video_out_x, audio_out_x = teacache.apply_cached_residual(
-                    video_args.x,
-                    audio_args.x if audio_args is not None else None,
-                )
-                video_args = video_args.replace(x=video_out_x)
-                if audio_args is not None and audio_out_x is not None:
-                    audio_args = audio_args.replace(x=audio_out_x)
-                return video_args, audio_args
-
-        # Save input for residual computation
-        video_input = video_args.x if video_args is not None else None
-        audio_input = audio_args.x if audio_args is not None else None
-
-        # Run all blocks normally
-        # mx.eval is mlx.core.eval — tensor materialization, NOT Python eval()
-        materialize = mx.eval  # noqa: S307  — mx.eval materializes MLX tensors, not Python eval
+        """Process all transformer blocks with periodic materialization for memory."""
+        # mx.eval is mlx.core.eval (tensor materialization), NOT Python eval()
+        force_materialize = mx.eval  # noqa: S307
         for i, block in enumerate(self.transformer_blocks):
             video_args, audio_args = block(video_args, audio_args)
 
             if self._eval_frequency > 0 and (i + 1) % self._eval_frequency == 0:
                 if video_args is not None:
-                    materialize(video_args.x)
+                    force_materialize(video_args.x)
                 if audio_args is not None:
-                    materialize(audio_args.x)
-
-        # Store residuals for future steps
-        if teacache is not None and video_input is not None and video_args is not None:
-            teacache.store_residuals(
-                video_input,
-                video_args.x,
-                audio_input,
-                audio_args.x if audio_args is not None else None,
-            )
+                    force_materialize(audio_args.x)
 
         return video_args, audio_args
 
@@ -754,10 +715,6 @@ class X0Model(nn.Module):
     def __init__(self, velocity_model: LTXModel):
         super().__init__()
         self.velocity_model = velocity_model
-
-    def set_teacache(self, teacache) -> None:
-        """Delegate to inner velocity model."""
-        self.velocity_model.set_teacache(teacache)
 
     def set_step_info(self, step_idx: int, total_steps: int) -> None:
         """Delegate to inner velocity model."""

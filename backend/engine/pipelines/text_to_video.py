@@ -45,9 +45,8 @@ class GenerationResult:
 class TextToVideoPipeline:
     """Text-to-Video generation pipeline using MLX."""
 
-    def __init__(self, model_manager: ModelManager, teacache_enabled: bool = True) -> None:
+    def __init__(self, model_manager: ModelManager) -> None:
         self._model_manager = model_manager
-        self._teacache_enabled = teacache_enabled
 
     async def generate(
         self,
