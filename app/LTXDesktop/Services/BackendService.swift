@@ -52,10 +52,6 @@ class BackendService: ObservableObject {
         return try await post("/api/v1/generate/text-to-video?priority=\(priority)", body: request)
     }
 
-    func generatePreview(request: PreviewRequest) async throws -> QueueSubmitResponse {
-        return try await post("/api/v1/generate/preview", body: request)
-    }
-
     func generateImageToVideo(request: I2VRequest, priority: String = "normal") async throws -> QueueSubmitResponse {
         return try await post("/api/v1/generate/image-to-video?priority=\(priority)", body: request)
     }

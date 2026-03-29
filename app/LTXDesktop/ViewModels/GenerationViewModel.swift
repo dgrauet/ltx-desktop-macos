@@ -237,39 +237,6 @@ class GenerationViewModel: ObservableObject {
         stopQueuePolling()
     }
 
-    func generatePreview(using service: BackendService) async {
-        guard !prompt.isEmpty else { return }
-
-        isGenerating = true
-        progress = 0
-        errorMessage = nil
-        outputVideoURL = nil
-        progressiveFrame = nil
-        statusMessage = nil
-
-        let request = PreviewRequest(
-            prompt: prompt,
-            seed: seed,
-            sourceImagePath: sourceImagePath,
-            imageStrength: imageStrength,
-            upscale: upscale,
-            loraIds: selectedLoRAIdArray
-        )
-
-        do {
-            let submitResponse = try await service.generatePreview(request: request)
-            let jobId = submitResponse.jobId
-            currentJobId = jobId
-            queueLength = submitResponse.queueLength
-
-            await trackJob(jobId: jobId, service: service)
-
-        } catch {
-            errorMessage = error.localizedDescription
-            isGenerating = false
-            statusMessage = nil
-        }
-    }
 
     func enhancePrompt(using service: BackendService) async {
         guard !prompt.isEmpty else { return }

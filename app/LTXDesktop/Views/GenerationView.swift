@@ -298,18 +298,6 @@ struct GenerationView: View {
                         .disabled(vm.prompt.isEmpty)
                         .keyboardShortcut("g", modifiers: .command)
 
-                        Button(action: {
-                            Task { await vm.generatePreview(using: backendService) }
-                        }) {
-                            HStack(spacing: 4) {
-                                Image(systemName: "eye")
-                                Text("Preview")
-                            }
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.large)
-                        .disabled(vm.prompt.isEmpty)
-                        .keyboardShortcut("p", modifiers: .command)
                     }
 
                     // Add to Queue button — always enabled (that's the point of a queue)

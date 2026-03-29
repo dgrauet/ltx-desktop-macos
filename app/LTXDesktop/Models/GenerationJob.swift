@@ -21,22 +21,6 @@ struct T2VRequest: Codable {
     }
 }
 
-struct PreviewRequest: Codable {
-    var prompt: String
-    var seed: Int = -1
-    var fps: Int = 24
-    var sourceImagePath: String?
-    var imageStrength: Double = 1.0
-    var upscale: Bool = false
-    var loraIds: [String] = []
-
-    enum CodingKeys: String, CodingKey {
-        case prompt, seed, fps, upscale
-        case sourceImagePath = "source_image_path"
-        case imageStrength = "image_strength"
-        case loraIds = "lora_ids"
-    }
-}
 
 struct I2VRequest: Codable {
     var prompt: String

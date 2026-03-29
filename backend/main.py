@@ -26,7 +26,6 @@ from engine.model_download_manager import ModelDownloadManager
 import history_store
 import preset_manager
 from engine.pipelines.text_to_video import TextToVideoPipeline
-from engine.pipelines.preview import PreviewPipeline
 from engine.pipelines.image_to_video import ImageToVideoPipeline
 from engine.pipelines.retake import RetakePipeline
 from engine.pipelines.extend import ExtendPipeline
@@ -42,7 +41,6 @@ log = logging.getLogger(__name__)
 model_manager = ModelManager()
 model_download_manager = ModelDownloadManager()
 t2v_pipeline = TextToVideoPipeline(model_manager)
-preview_pipeline = PreviewPipeline(model_manager)
 i2v_pipeline = ImageToVideoPipeline(model_manager)
 retake_pipeline = RetakePipeline(model_manager)
 extend_pipeline = ExtendPipeline(model_manager)
@@ -103,16 +101,6 @@ class T2VRequest(BaseModel):
     pipeline_type: str = Field(default="one-stage", pattern="^(one-stage|two-stage|two-stage-hq)$")
     lora_ids: list[str] = Field(default=[], description="LoRA IDs to apply (empty = use active LoRAs)")
 
-
-class PreviewRequest(BaseModel):
-    """Rapid preview generation request. Resolution and steps are fixed."""
-    prompt: str = Field(..., min_length=1, max_length=2000)
-    seed: int = Field(default=-1, description="Random seed (-1 for random)")
-    fps: int = Field(default=24, ge=1, le=60)
-    source_image_path: str | None = Field(default=None)
-    image_strength: float = Field(default=1.0, ge=0.0, le=1.0)
-    upscale: bool = Field(default=False, description="2x spatial upscale (384x256 -> 768x512)")
-    lora_ids: list[str] = Field(default=[], description="LoRA IDs to apply (empty = use active LoRAs)")
 
 
 class I2VRequest(BaseModel):
@@ -689,31 +677,6 @@ async def generate_t2v(req: T2VRequest, priority: str = "normal"):
     )
 
 
-@app.post("/api/v1/generate/preview", response_model=QueueSubmitResponse)
-async def generate_preview(req: PreviewRequest):
-    """Submit a rapid preview generation job (384x256, 4 steps).
-
-    Preview jobs always get HIGH priority and auto-cancel previous previews.
-    """
-    _check_queue_paused()
-    job_id = str(uuid.uuid4())[:8]
-    jobs[job_id] = {
-        "status": "queued", "progress": 0.0, "result": None, "error": None,
-        "job_type": "preview", "prompt": req.prompt, "priority": "high",
-    }
-
-    position = await job_queue.submit(
-        job_id=job_id,
-        job_type="preview",
-        priority=Priority.HIGH,
-        prompt=req.prompt,
-        coroutine_factory=lambda jid=job_id, r=req: _run_preview(jid, r),
-    )
-
-    return QueueSubmitResponse(
-        job_id=job_id, position=position, queue_length=job_queue.get_queue_length(),
-    )
-
 
 @app.post("/api/v1/generate/image-to-video", response_model=QueueSubmitResponse)
 async def generate_i2v(req: I2VRequest, priority: str = "normal"):
@@ -802,58 +765,7 @@ async def _run_t2v(job_id: str, req: T2VRequest) -> None:
         memory_pressure_monitor.check_pressure(job_queue)
 
 
-async def _run_preview(job_id: str, req: PreviewRequest) -> None:
-    """Execute rapid preview generation in background."""
-    jobs[job_id]["status"] = "running"
-    resolved_seed = _resolve_seed(req.seed)
 
-    async def progress_cb(step: int, total: int, pct: float, preview_frame: str | None = None, *, status: str | None = None) -> None:
-        jobs[job_id]["progress"] = pct
-        await _broadcast_progress(job_id, step, total, pct, preview_frame=preview_frame, status=status)
-
-    try:
-        result = await preview_pipeline.generate(
-            prompt=req.prompt,
-            seed=resolved_seed,
-            fps=req.fps,
-            image=req.source_image_path,
-            image_strength=req.image_strength,
-            lora_args=_resolve_lora_args(req.lora_ids),
-            model_repo_id=selected_video_model,
-            progress_callback=progress_cb,
-        )
-        jobs[job_id]["status"] = "completed"
-        jobs[job_id]["progress"] = 1.0
-        jobs[job_id]["result"] = {
-            "job_id": result.job_id,
-            "output_path": result.output_path,
-            "duration_seconds": result.duration_seconds,
-            "memory_after": result.memory_after,
-            "stages": result.stages,
-        }
-        await _broadcast_progress(job_id, 0, 0, 1.0, done=True)
-        log.info("Preview %s completed in %.2fs", job_id, result.duration_seconds)
-
-        history_store.add_entry(
-            job_id=job_id,
-            prompt=req.prompt,
-            output_path=result.output_path,
-            duration_seconds=result.duration_seconds,
-            width=384,
-            height=256,
-            num_frames=9,
-            fps=req.fps,
-            seed=resolved_seed,
-            generation_type="preview",
-        )
-
-    except Exception as e:
-        jobs[job_id]["status"] = "failed"
-        jobs[job_id]["error"] = str(e)
-        log.error("Preview %s failed: %s", job_id, e)
-        await _broadcast_progress(job_id, 0, 0, 0.0, error=str(e))
-    finally:
-        memory_pressure_monitor.check_pressure(job_queue)
 
 
 async def _run_i2v(job_id: str, req: I2VRequest) -> None:
