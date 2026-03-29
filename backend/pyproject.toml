@@ -7,8 +7,8 @@ license = "Apache-2.0"
 dependencies = [
     # MLX stack
     "mlx>=0.31.0",
-    "mlx-video-with-audio>=0.1.3",
-    "mlx-lm>=0.31.0",
+    "ltx-core-mlx @ git+https://github.com/dgrauet/ltx-2-mlx@main#subdirectory=packages/ltx-core-mlx",
+    "ltx-pipelines-mlx @ git+https://github.com/dgrauet/ltx-2-mlx@main#subdirectory=packages/ltx-pipelines-mlx",
     # API
     "fastapi>=0.115.0",
     "uvicorn>=0.32.0",
@@ -24,7 +24,7 @@ dependencies = [
     "tqdm>=4.66.0",
     "pillow>=10.4.0",
     "soundfile>=0.12.0",
-    # TTS via Kokoro — mlx-audio 0.4.1+ resolved mlx-lm pin conflict
+    # TTS via Kokoro
     "mlx-audio>=0.4.1",
 ]
 
