@@ -30,7 +30,7 @@ from engine.pipelines.preview import PreviewPipeline
 from engine.pipelines.image_to_video import ImageToVideoPipeline
 from engine.pipelines.retake import RetakePipeline
 from engine.pipelines.extend import ExtendPipeline
-from engine.prompt_enhancer import PromptEnhancer
+from engine.mlx_runner import run_prompt_enhance
 from engine.lora_manager import LoRAManager
 from audio.tts_engine import TTSEngine
 from audio.audio_mixer import AudioMixer
@@ -48,7 +48,6 @@ preview_pipeline = PreviewPipeline(model_manager)
 i2v_pipeline = ImageToVideoPipeline(model_manager)
 retake_pipeline = RetakePipeline(model_manager)
 extend_pipeline = ExtendPipeline(model_manager)
-prompt_enhancer = PromptEnhancer()
 lora_manager = LoRAManager(model_manager)
 tts_engine = TTSEngine()
 audio_mixer = AudioMixer()
@@ -788,7 +787,6 @@ async def _run_t2v(job_id: str, req: T2VRequest) -> None:
             seed=resolved_seed,
             guidance_scale=req.guidance_scale,
             fps=req.fps,
-            upscale=req.upscale,
             lora_args=_resolve_lora_args(req.lora_ids),
             model_repo_id=selected_video_model,
             progress_callback=progress_cb,
@@ -843,7 +841,6 @@ async def _run_preview(job_id: str, req: PreviewRequest) -> None:
             fps=req.fps,
             image=req.source_image_path,
             image_strength=req.image_strength,
-            upscale=req.upscale,
             lora_args=_resolve_lora_args(req.lora_ids),
             model_repo_id=selected_video_model,
             progress_callback=progress_cb,
@@ -903,9 +900,8 @@ async def _run_i2v(job_id: str, req: I2VRequest) -> None:
             guidance_scale=req.guidance_scale,
             fps=req.fps,
             image_strength=req.image_strength,
-            model_repo_id=selected_video_model,
-            upscale=req.upscale,
             lora_args=_resolve_lora_args(req.lora_ids),
+            model_repo_id=selected_video_model,
             progress_callback=progress_cb,
         )
         jobs[job_id]["status"] = "completed"
@@ -1108,25 +1104,18 @@ async def _run_extend(job_id: str, req: ExtendRequest) -> None:
 
 # --- Prompt enhancement endpoint ---
 
-@app.post("/api/v1/prompt/enhance", response_model=EnhanceResponse)
+@app.post("/api/v1/prompt/enhance")
 async def enhance_prompt(req: EnhanceRequest):
-    """Enhance a prompt via Qwen3.5-2B (lazy load/unload)."""
-    if not prompt_enhancer.is_available():
-        raise HTTPException(
-            status_code=503,
-            detail="Prompt enhancer not available: install mlx-lm",
-        )
-
+    """Enhance a prompt using Gemma 3 12B via subprocess."""
     try:
-        result = await asyncio.get_event_loop().run_in_executor(
-            None, prompt_enhancer.enhance, req.prompt, req.is_i2v
+        enhanced = await run_prompt_enhance(
+            prompt=req.prompt,
+            is_i2v=req.is_i2v,
+            model_repo_id=selected_video_model,
         )
-    except Exception as exc:
-        raise HTTPException(
-            status_code=503,
-            detail=f"Prompt enhancement failed: {exc}",
-        )
-    return EnhanceResponse(original=req.prompt, enhanced=result)
+        return EnhanceResponse(original=req.prompt, enhanced=enhanced)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Enhancement failed: {e}")
 
 
 # --- Queue endpoints ---
