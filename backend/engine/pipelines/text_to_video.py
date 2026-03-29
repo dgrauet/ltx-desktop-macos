@@ -98,10 +98,12 @@ class TextToVideoPipeline:
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         output_path = OUTPUT_DIR / f"{job_id}.mp4"
 
-        # Adapt mlx_runner progress to pipeline progress_callback format
+        # Adapt mlx_runner progress callback to pipeline format
+        # Runner calls: callback(step, total, pct, preview_frame, status=...)
         async def _progress_adapter(
-            step: int, total_steps: int, stage: int, pct: float,
-            *, status: str | None = None, preview_frame: str | None = None,
+            step: int, total_steps: int, pct: float,
+            preview_frame: str | None = None,
+            *, status: str | None = None,
         ) -> None:
             await _notify(step, total_steps, pct, preview_frame, status=status)
 
