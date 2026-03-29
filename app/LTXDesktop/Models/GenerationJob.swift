@@ -9,13 +9,14 @@ struct T2VRequest: Codable {
     var seed: Int = -1
     var guidanceScale: Double = 1.0
     var fps: Int = 24
-    var upscale: Bool = false
+    var pipelineType: String = "one-stage"
     var loraIds: [String] = []
 
     enum CodingKeys: String, CodingKey {
-        case prompt, width, height, steps, seed, fps, upscale
+        case prompt, width, height, steps, seed, fps
         case numFrames = "num_frames"
         case guidanceScale = "guidance_scale"
+        case pipelineType = "pipeline_type"
         case loraIds = "lora_ids"
     }
 }

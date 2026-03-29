@@ -8,6 +8,7 @@ class GenerationViewModel: ObservableObject {
     @Published var selectedResolution: Resolution = .landscape768
     @Published var numFrames = 97
     @Published var steps = 8
+    @Published var pipelineType = "one-stage"
     @Published var fps = 24
     @Published var seed = -1
     @Published var isGenerating = false
@@ -157,7 +158,7 @@ class GenerationViewModel: ObservableObject {
                     steps: steps,
                     seed: seed,
                     fps: fps,
-                    upscale: upscale,
+                    pipelineType: pipelineType,
                     loraIds: selectedLoRAIdArray
                 )
                 submitResponse = try await service.generateTextToVideo(request: request, priority: priority)

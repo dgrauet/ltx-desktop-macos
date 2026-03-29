@@ -146,6 +146,9 @@ async def run_mlx_generation(
     image: str | None = None,
     image_strength: float = 1.0,
     num_steps: int = 8,
+    pipeline_type: str = "one-stage",
+    cfg_scale: float = 3.0,
+    stg_scale: float = 0.0,
     enhance_prompt: bool = False,
     lora_args: list[str] | None = None,
     retake_source: str | None = None,
@@ -180,6 +183,9 @@ async def run_mlx_generation(
         "--fps", str(fps),
         "--output-path", output_path,
         "--num-steps", str(num_steps),
+        "--pipeline-type", pipeline_type,
+        "--cfg-scale", str(cfg_scale),
+        "--stg-scale", str(stg_scale),
     ]
 
     # I2V args

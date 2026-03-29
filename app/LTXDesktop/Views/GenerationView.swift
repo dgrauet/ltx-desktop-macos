@@ -174,6 +174,18 @@ struct GenerationView: View {
                     .padding(.horizontal, 4)
                 }
 
+                // Pipeline type
+                HStack {
+                    Text("Pipeline")
+                        .font(.subheadline)
+                    Picker("", selection: $vm.pipelineType) {
+                        Text("One Stage").tag("one-stage")
+                        Text("Two Stage").tag("two-stage")
+                        Text("Two Stage HQ").tag("two-stage-hq")
+                    }
+                    .pickerStyle(.segmented)
+                }
+
                 // Steps + Seed
                 HStack {
                     Text("Steps")

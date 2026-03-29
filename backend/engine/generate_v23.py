@@ -40,25 +40,32 @@ def _report_memory(label: str) -> None:
 # ---------------------------------------------------------------------------
 
 def _create_pipeline(args: argparse.Namespace):
-    """Instantiate the correct library pipeline for the given mode."""
+    """Instantiate the correct library pipeline for the given mode and pipeline type."""
     from ltx_pipelines_mlx import (
         ExtendPipeline,
         ImageToVideoPipeline,
         RetakePipeline,
         TextToVideoPipeline,
+        TwoStageHQPipeline,
+        TwoStagePipeline,
     )
 
     model_dir = args.model_dir
     gemma = args.gemma or "mlx-community/gemma-3-12b-it-4bit"
     low_memory = True
+    pipeline_type = getattr(args, "pipeline_type", "one-stage")
 
     if args.mode == "retake":
         return RetakePipeline(model_dir, gemma_model_id=gemma, low_memory=low_memory)
     elif args.mode == "extend":
         return ExtendPipeline(model_dir, gemma_model_id=gemma, low_memory=low_memory)
+    elif pipeline_type == "two-stage":
+        return TwoStagePipeline(model_dir, gemma_model_id=gemma, low_memory=low_memory)
+    elif pipeline_type == "two-stage-hq":
+        return TwoStageHQPipeline(model_dir, gemma_model_id=gemma, low_memory=low_memory)
     elif args.mode == "i2v":
         return ImageToVideoPipeline(model_dir, gemma_model_id=gemma, low_memory=low_memory)
-    else:  # t2v (default)
+    else:  # one-stage t2v
         return TextToVideoPipeline(model_dir, gemma_model_id=gemma, low_memory=low_memory)
 
 
@@ -83,6 +90,9 @@ def _run_t2v(pipeline, args: argparse.Namespace) -> None:
     _report_memory("after_model_load")
     _progress("STATUS:Generating video")
 
+    pipeline_type = getattr(args, "pipeline_type", "one-stage")
+    is_two_stage = pipeline_type in ("two-stage", "two-stage-hq")
+
     gen_kwargs: dict = {
         "prompt": args.prompt,
         "output_path": args.output_path,
@@ -90,8 +100,14 @@ def _run_t2v(pipeline, args: argparse.Namespace) -> None:
         "width": args.width,
         "num_frames": args.num_frames,
         "seed": args.seed,
-        "num_steps": args.num_steps,
     }
+
+    if is_two_stage:
+        gen_kwargs["stage1_steps"] = args.num_steps
+        gen_kwargs["cfg_scale"] = args.cfg_scale
+        gen_kwargs["stg_scale"] = args.stg_scale
+    else:
+        gen_kwargs["num_steps"] = args.num_steps
 
     if args.mode == "i2v" and args.image:
         gen_kwargs["image"] = args.image
@@ -223,6 +239,12 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--fps", type=int, default=24)
     parser.add_argument("--num-steps", type=int, default=8)
+    parser.add_argument("--pipeline-type", choices=["one-stage", "two-stage", "two-stage-hq"],
+                        default="one-stage", help="Pipeline variant")
+    parser.add_argument("--cfg-scale", type=float, default=3.0,
+                        help="CFG guidance scale (two-stage only)")
+    parser.add_argument("--stg-scale", type=float, default=0.0,
+                        help="STG guidance scale (two-stage only)")
 
     # I2V
     parser.add_argument("--image", default=None, help="Reference image path for I2V")
