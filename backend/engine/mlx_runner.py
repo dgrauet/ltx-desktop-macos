@@ -22,7 +22,14 @@ log = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-DEFAULT_MODEL_REPO = "dgrauet/ltx-2.3-mlx-distilled-q8"
+DEFAULT_MODEL_REPO = "dgrauet/ltx-2.3-mlx-q8"
+
+# Fallback repo IDs for models cached under old names (before rename)
+_REPO_ALIASES = {
+    "dgrauet/ltx-2.3-mlx-q8": "dgrauet/ltx-2.3-mlx-distilled-q8",
+    "dgrauet/ltx-2.3-mlx-q4": "dgrauet/ltx-2.3-mlx-distilled-q4",
+    "dgrauet/ltx-2.3-mlx": "dgrauet/ltx-2.3-mlx-distilled",
+}
 
 _HF_CACHE = Path.home() / ".cache" / "huggingface" / "hub"
 
@@ -77,11 +84,21 @@ def get_model_repo(repo_id: str | None = None) -> tuple[str, bool]:
 
 
 def _resolve_hf_model(repo_id: str) -> str | None:
-    """Check HF cache for a downloaded model. Returns directory path or None."""
-    for check_file in ("transformer-distilled.safetensors", "transformer-dev.safetensors"):
-        result = try_to_load_from_cache(repo_id, check_file)
-        if result and isinstance(result, str):
-            return str(Path(result).parent)
+    """Check HF cache for a downloaded model. Returns directory path or None.
+
+    Tries the given repo_id first, then falls back to old aliases
+    (for models cached before the repo rename).
+    """
+    candidates = [repo_id]
+    if repo_id in _REPO_ALIASES:
+        candidates.append(_REPO_ALIASES[repo_id])
+
+    for candidate in candidates:
+        for check_file in ("transformer-distilled.safetensors", "transformer-dev.safetensors",
+                           "transformer.safetensors"):
+            result = try_to_load_from_cache(candidate, check_file)
+            if result and isinstance(result, str):
+                return str(Path(result).parent)
     return None
 
 

@@ -66,17 +66,23 @@ def _create_pipeline(args: argparse.Namespace):
 # Pipeline execution
 # ---------------------------------------------------------------------------
 
+def _set_loras(pipeline, args: argparse.Namespace) -> None:
+    """Set pending LoRAs on the pipeline before loading."""
+    if args.lora:
+        pipeline._pending_loras = _parse_lora_args(args.lora)
+
+
 def _run_t2v(pipeline, args: argparse.Namespace) -> None:
     """Text-to-video or image-to-video generation."""
     _progress("STATUS:Loading model")
     _report_memory("before_load")
 
+    _set_loras(pipeline, args)
     pipeline.load()
 
     _report_memory("after_model_load")
     _progress("STATUS:Generating video")
 
-    # Build kwargs matching the library's generate_and_save signature
     gen_kwargs: dict = {
         "prompt": args.prompt,
         "output_path": args.output_path,
@@ -87,12 +93,8 @@ def _run_t2v(pipeline, args: argparse.Namespace) -> None:
         "num_steps": args.num_steps,
     }
 
-    # I2V-specific: pass image if the pipeline supports it
     if args.mode == "i2v" and args.image:
-        import inspect
-        i2v_sig = inspect.signature(pipeline.generate_and_save)
-        if "image" in i2v_sig.parameters:
-            gen_kwargs["image"] = args.image
+        gen_kwargs["image"] = args.image
 
     pipeline.generate_and_save(**gen_kwargs)
 
@@ -105,6 +107,7 @@ def _run_retake(pipeline, args: argparse.Namespace) -> None:
     _progress("STATUS:Loading model")
     _report_memory("before_load")
 
+    _set_loras(pipeline, args)
     pipeline.load()
 
     _report_memory("after_model_load")
@@ -131,6 +134,7 @@ def _run_extend(pipeline, args: argparse.Namespace) -> None:
     _progress("STATUS:Loading model")
     _report_memory("before_load")
 
+    _set_loras(pipeline, args)
     pipeline.load()
 
     _report_memory("after_model_load")
