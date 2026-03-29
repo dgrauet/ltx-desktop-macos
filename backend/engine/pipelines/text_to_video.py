@@ -5,19 +5,17 @@ Uses MLX inference via mlx-video-with-audio subprocess for real video generation
 
 from __future__ import annotations
 
-import asyncio
 import inspect
 import logging
 import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Awaitable, Callable
+from typing import Callable
 
 from engine.memory_manager import (
     aggressive_cleanup,
     build_memory_stats_from_subprocess,
-    get_memory_stats,
     increment_generation_count,
     periodic_reload_check,
     reset_peak_memory,
@@ -58,7 +56,6 @@ class TextToVideoPipeline:
         seed: int = 42,
         guidance_scale: float = 1.0,
         fps: int = 24,
-        upscale: bool = False,
         lora_args: list[str] | None = None,
         model_repo_id: str | None = None,
         progress_callback: Callable[[int, int, float, str | None], None] | None = None,
@@ -74,6 +71,8 @@ class TextToVideoPipeline:
             seed: Random seed for reproducibility.
             guidance_scale: Classifier-free guidance scale.
             fps: Output frames per second.
+            lora_args: Optional LoRA arguments.
+            model_repo_id: Optional HuggingFace model repo ID.
             progress_callback: Optional callback(step, total_steps, pct, preview_frame).
 
         Returns:
@@ -122,10 +121,9 @@ class TextToVideoPipeline:
             seed=seed,
             fps=fps,
             output_path=str(output_path),
+            mode="t2v",
             num_steps=steps,
-            upscale=upscale,
             lora_args=lora_args,
-            preview_interval=2,
             progress_callback=_progress_adapter,
             model_repo_id=model_repo_id,
         )

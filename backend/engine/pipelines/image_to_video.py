@@ -11,12 +11,11 @@ import logging
 import time
 import uuid
 from pathlib import Path
-from typing import Awaitable, Callable
+from typing import Callable
 
 from engine.memory_manager import (
     aggressive_cleanup,
     build_memory_stats_from_subprocess,
-    get_memory_stats,
     increment_generation_count,
     periodic_reload_check,
     reset_peak_memory,
@@ -48,7 +47,6 @@ class ImageToVideoPipeline:
         guidance_scale: float = 1.0,
         fps: int = 24,
         image_strength: float = 1.0,
-        upscale: bool = False,
         lora_args: list[str] | None = None,
         model_repo_id: str | None = None,
         progress_callback: Callable[[int, int, float, str | None], None] | None = None,
@@ -117,12 +115,11 @@ class ImageToVideoPipeline:
             seed=seed,
             fps=fps,
             output_path=str(output_path),
+            mode="i2v",
             image=source_image_path,
             image_strength=image_strength,
             num_steps=steps,
-            upscale=upscale,
             lora_args=lora_args,
-            preview_interval=2,
             progress_callback=_progress_adapter,
             model_repo_id=model_repo_id,
         )

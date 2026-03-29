@@ -12,12 +12,11 @@ import logging
 import time
 import uuid
 from pathlib import Path
-from typing import Awaitable, Callable
+from typing import Callable
 
 from engine.memory_manager import (
     aggressive_cleanup,
     build_memory_stats_from_subprocess,
-    get_memory_stats,
     reset_peak_memory,
 )
 from engine.mlx_runner import run_mlx_generation
@@ -47,7 +46,6 @@ class PreviewPipeline:
         num_frames: int = 9,
         image: str | None = None,
         image_strength: float = 1.0,
-        upscale: bool = False,
         lora_args: list[str] | None = None,
         model_repo_id: str | None = None,
         progress_callback: Callable[[int, int, float, str | None], None] | None = None,
@@ -106,10 +104,10 @@ class PreviewPipeline:
             seed=seed,
             fps=fps,
             output_path=str(output_path),
+            mode="i2v" if image else "t2v",
             image=image,
             image_strength=image_strength,
-            upscale=False,
-            ffmpeg_upscale=True,  # lanczos 2x: 384×256 → 768×512, ~1s, no GPU cost
+            num_steps=4,
             lora_args=lora_args,
             progress_callback=_progress_adapter,
             model_repo_id=model_repo_id,
