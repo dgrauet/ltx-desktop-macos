@@ -3,6 +3,7 @@
 Invoked as: python -m engine.generate_v23 --mode t2v --prompt "..." --output-path out.mp4 ...
 Emits progress on stderr in the format parsed by mlx_runner.py:
   STATUS:<message>
+  STAGE:<n>:STEP:<step>:<total>
   MEMORY:<label>:active=<gb>:cache=<gb>:peak=<gb>
 """
 
@@ -15,6 +16,70 @@ from pathlib import Path
 import mlx.core as mx
 
 from engine.memory_manager import aggressive_cleanup, get_memory_stats
+
+
+# ---------------------------------------------------------------------------
+# tqdm monkey-patch — intercept library progress bars to emit STAGE/STEP
+# ---------------------------------------------------------------------------
+
+_current_stage = 1
+
+
+class _ProgressTqdm:
+    """Drop-in tqdm replacement that emits STAGE:STEP lines on stderr."""
+
+    def __init__(self, iterable=None, *, desc="", total=None, disable=False, **kwargs):
+        global _current_stage
+        self._iterable = iterable
+        self._items = list(iterable) if iterable is not None else []
+        self._total = total or len(self._items)
+        self._desc = desc or ""
+        self._disable = disable
+        self._step = 0
+        # Emit a STATUS for each new denoising loop
+        if not disable and "denois" in self._desc.lower():
+            _progress(f"STATUS:Denoising stage {_current_stage} ({self._total} steps)")
+
+    def __iter__(self):
+        global _current_stage
+        for item in self._items:
+            self._step += 1
+            if not self._disable:
+                _progress(f"STAGE:{_current_stage}:STEP:{self._step}:{self._total}")
+            yield item
+        # After completing a denoising loop, advance stage for next loop
+        if not self._disable and "denois" in self._desc.lower():
+            _current_stage += 1
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        pass
+
+    def update(self, n=1):
+        self._step += n
+        if not self._disable:
+            _progress(f"STAGE:{_current_stage}:STEP:{self._step}:{self._total}")
+
+    def close(self):
+        pass
+
+    def set_description(self, desc):
+        self._desc = desc
+
+
+def _install_tqdm_hook():
+    """Replace tqdm in the library modules with our progress emitter."""
+    import ltx_pipelines_mlx.utils.samplers as samplers_mod
+    samplers_mod.tqdm = _ProgressTqdm
+    # Also patch any other module that imports tqdm
+    try:
+        import ltx_core_mlx.model.video_vae.video_vae as vae_mod
+        if hasattr(vae_mod, "tqdm"):
+            vae_mod.tqdm = _ProgressTqdm
+    except (ImportError, AttributeError):
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -81,6 +146,8 @@ def _set_loras(pipeline, args: argparse.Namespace) -> None:
 
 def _run_t2v(pipeline, args: argparse.Namespace) -> None:
     """Text-to-video or image-to-video generation."""
+    global _current_stage
+
     _progress("STATUS:Loading model")
     _report_memory("before_load")
 
@@ -88,6 +155,7 @@ def _run_t2v(pipeline, args: argparse.Namespace) -> None:
     pipeline.load()
 
     _report_memory("after_model_load")
+    _current_stage = 1
     _progress("STATUS:Generating video")
 
     pipeline_type = getattr(args, "pipeline_type", "one-stage")
@@ -279,6 +347,7 @@ def main() -> None:
         _run_enhance(args)
         return
 
+    _install_tqdm_hook()
     pipeline = _create_pipeline(args)
 
     if args.mode == "retake":
