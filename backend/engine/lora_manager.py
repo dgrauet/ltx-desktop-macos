@@ -86,14 +86,14 @@ def _check_compatibility(path: Path) -> bool:
         weights = mx.load(str(path))
         keys = list(weights.keys())
 
-        # Check for standard LoRA key patterns
+        # Check for standard LoRA key patterns (lora_down/lora_up or lora_A/lora_B)
         has_lora_keys = any(
-            "lora_down" in k or "lora_up" in k
+            "lora_down" in k or "lora_up" in k or "lora_A" in k or "lora_B" in k
             for k in keys
         )
         if not has_lora_keys:
             log.warning(
-                "File %s does not contain lora_down/lora_up keys — may not be a LoRA",
+                "File %s does not contain LoRA keys (lora_down/up or lora_A/B)",
                 path.name,
             )
             return False
