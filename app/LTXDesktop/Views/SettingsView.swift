@@ -281,26 +281,6 @@ struct SettingsView: View {
                     }
                 }
 
-                // MARK: - LoRA Info
-                settingsSection(title: "LoRA", icon: "puzzlepiece.extension") {
-                    HStack(spacing: 8) {
-                        Image(systemName: "puzzlepiece.extension")
-                            .foregroundStyle(.secondary)
-                        Text("Manage LoRAs in the LoRA tab in the sidebar.")
-                            .font(.body)
-                        Spacer()
-                    }
-
-                    HStack(spacing: 6) {
-                        Image(systemName: "exclamationmark.triangle")
-                            .foregroundStyle(.orange)
-                            .font(.caption)
-                        Text("LoRAs must be compatible with the LTX-2.3 latent space. LTX-2.0 LoRAs are not compatible.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
             }
             .padding(20)
         }
