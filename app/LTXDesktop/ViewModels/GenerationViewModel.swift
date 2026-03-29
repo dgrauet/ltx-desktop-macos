@@ -10,10 +10,13 @@ class GenerationViewModel: ObservableObject {
     @Published var steps = 8
     @Published var pipelineType = "one-stage" {
         didSet {
-            switch pipelineType {
-            case "two-stage": steps = 30
-            case "two-stage-hq": steps = 15
-            default: steps = 8
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                switch self.pipelineType {
+                case "two-stage": self.steps = 30
+                case "two-stage-hq": self.steps = 15
+                default: self.steps = 8
+                }
             }
         }
     }
