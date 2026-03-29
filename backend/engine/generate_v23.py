@@ -71,37 +71,30 @@ def _run_t2v(pipeline, args: argparse.Namespace) -> None:
     _progress("STATUS:Loading model")
     _report_memory("before_load")
 
-    lora_paths = _parse_lora_args(args.lora) if args.lora else None
-    pipeline.load(lora_paths=lora_paths)
+    pipeline.load()
 
     _report_memory("after_model_load")
     _progress("STATUS:Generating video")
 
-    enhance = args.enhance_prompt
+    # Build kwargs matching the library's generate_and_save signature
+    gen_kwargs: dict = {
+        "prompt": args.prompt,
+        "output_path": args.output_path,
+        "height": args.height,
+        "width": args.width,
+        "num_frames": args.num_frames,
+        "seed": args.seed,
+        "num_steps": args.num_steps,
+    }
 
+    # I2V-specific: pass image if the pipeline supports it
     if args.mode == "i2v" and args.image:
-        pipeline.generate_and_save(
-            prompt=args.prompt,
-            output_path=args.output_path,
-            image=args.image,
-            height=args.height,
-            width=args.width,
-            num_frames=args.num_frames,
-            seed=args.seed,
-            num_steps=args.num_steps,
-            enhance_prompt=enhance,
-        )
-    else:
-        pipeline.generate_and_save(
-            prompt=args.prompt,
-            output_path=args.output_path,
-            height=args.height,
-            width=args.width,
-            num_frames=args.num_frames,
-            seed=args.seed,
-            num_steps=args.num_steps,
-            enhance_prompt=enhance,
-        )
+        import inspect
+        i2v_sig = inspect.signature(pipeline.generate_and_save)
+        if "image" in i2v_sig.parameters:
+            gen_kwargs["image"] = args.image
+
+    pipeline.generate_and_save(**gen_kwargs)
 
     _report_memory("after_generation")
     _progress("STATUS:Done")
@@ -112,8 +105,7 @@ def _run_retake(pipeline, args: argparse.Namespace) -> None:
     _progress("STATUS:Loading model")
     _report_memory("before_load")
 
-    lora_paths = _parse_lora_args(args.lora) if args.lora else None
-    pipeline.load(lora_paths=lora_paths)
+    pipeline.load()
 
     _report_memory("after_model_load")
     _progress("STATUS:Retaking segment")
@@ -139,8 +131,7 @@ def _run_extend(pipeline, args: argparse.Namespace) -> None:
     _progress("STATUS:Loading model")
     _report_memory("before_load")
 
-    lora_paths = _parse_lora_args(args.lora) if args.lora else None
-    pipeline.load(lora_paths=lora_paths)
+    pipeline.load()
 
     _report_memory("after_model_load")
     _progress("STATUS:Extending video")

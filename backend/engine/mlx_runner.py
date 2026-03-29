@@ -22,7 +22,7 @@ log = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-DEFAULT_MODEL_REPO = "dgrauet/ltx-2.3-mlx-q8"
+DEFAULT_MODEL_REPO = "dgrauet/ltx-2.3-mlx-distilled-q8"
 
 _HF_CACHE = Path.home() / ".cache" / "huggingface" / "hub"
 
@@ -211,6 +211,9 @@ async def run_mlx_generation(
     subprocess_memory: dict[str, dict] = {}
     last_pct = 0.0
     last_step, last_total, last_stage = 0, 0, 1
+    # Keep last N stderr lines for error diagnosis (readline consumes them)
+    from collections import deque
+    _stderr_tail: deque[str] = deque(maxlen=100)
 
     assert proc.stderr is not None
     while True:
@@ -218,6 +221,8 @@ async def run_mlx_generation(
         if not line_bytes:
             break
         line = line_bytes.decode("utf-8", errors="replace").rstrip()
+        if line:
+            _stderr_tail.append(line)
 
         # PREVIEW frame
         m = _PREVIEW_RE.match(line)
@@ -284,8 +289,8 @@ async def run_mlx_generation(
     await proc.wait()
 
     if proc.returncode != 0:
-        remaining = await proc.stderr.read()
-        error_tail = remaining.decode("utf-8", errors="replace")[-500:] if remaining else ""
+        # Build error message from captured stderr tail (readline already consumed everything)
+        error_tail = "\n".join(_stderr_tail)[-1000:]
         if proc.returncode == -6:
             raise RuntimeError(f"GPU out of memory (exit code -6). {error_tail}")
         raise RuntimeError(
