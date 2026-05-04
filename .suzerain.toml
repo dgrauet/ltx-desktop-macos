@@ -1,6 +1,16 @@
 [suzerain]
 version = "1"
-stack = "auto"
 mode = "advisory"
 
+[[subprojects]]
+name = "root"
+path = "."
+stack = "swift"
+
+[[subprojects]]
+name = "backend"
+path = "backend"
+stack = "python"
+
 [exemptions]
+
