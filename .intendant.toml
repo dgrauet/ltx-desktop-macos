@@ -1,10 +1,10 @@
-[suzerain]
+[intendant]
 version = "1"
-mode = "advisory"
+enforcement = "advisory"
 
 [[subprojects]]
-name = "root"
-path = "."
+name = "app"
+path = "app"
 stack = "swift"
 
 [[subprojects]]
@@ -13,4 +13,3 @@ path = "backend"
 stack = "python"
 
 [exemptions]
-
