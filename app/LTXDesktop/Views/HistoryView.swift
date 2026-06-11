@@ -302,7 +302,7 @@ struct VideoDetailView: View {
             // Player
             if let player = player {
                 ZStack(alignment: .topTrailing) {
-                    VideoPlayer(player: player)
+                    PlayerView(player: player)
                         .aspectRatio(16/9, contentMode: .fit)
                         .clipShape(RoundedRectangle(cornerRadius: 10))
 
@@ -333,6 +333,9 @@ struct VideoDetailView: View {
                     metadataRow(label: "Frames", value: "\(item.numFrames) @ \(item.fps) fps")
                     if item.durationSeconds > 0 {
                         metadataRow(label: "Duration", value: String(format: "%.1fs", item.durationSeconds))
+                    }
+                    if let genTime = item.generationTimeLabel {
+                        metadataRow(label: "Generation time", value: genTime)
                     }
                     metadataRow(label: "Seed", value: "\(item.seed)")
                     metadataRow(label: "Created", value: Self.fullDateFormatter.string(from: item.createdAt))

@@ -324,6 +324,7 @@ struct HistoryEntry: Decodable {
     let prompt: String
     let outputPath: String
     let durationSeconds: Double
+    let generationTimeSeconds: Double?
     let width: Int
     let height: Int
     let numFrames: Int
@@ -337,6 +338,7 @@ struct HistoryEntry: Decodable {
         case jobId = "job_id"
         case outputPath = "output_path"
         case durationSeconds = "duration_seconds"
+        case generationTimeSeconds = "generation_time_seconds"
         case numFrames = "num_frames"
         case generationType = "generation_type"
         case createdAt = "created_at"

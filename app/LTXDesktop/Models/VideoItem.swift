@@ -11,12 +11,20 @@ struct VideoItem: Identifiable, Codable {
     let numFrames: Int
     let fps: Int
     let durationSeconds: Double
+    let generationTimeSeconds: Double?
     let createdAt: Date
     let generationType: String
 
     var fileURL: URL { URL(fileURLWithPath: outputPath) }
     var displayName: String { "Video \(jobId)" }
     var resolutionLabel: String { "\(width)×\(height)" }
+
+    /// "6m 47s" style label for the wall-clock generation time, if recorded.
+    var generationTimeLabel: String? {
+        guard let t = generationTimeSeconds, t > 0 else { return nil }
+        let total = Int(t.rounded())
+        return total >= 60 ? "\(total / 60)m \(total % 60)s" : "\(total)s"
+    }
 
     var generationTypeLabel: String {
         switch generationType {
@@ -38,6 +46,7 @@ struct VideoItem: Identifiable, Codable {
         case numFrames = "num_frames"
         case fps
         case durationSeconds = "duration_seconds"
+        case generationTimeSeconds = "generation_time_seconds"
         case createdAt = "created_at"
         case generationType = "generation_type"
     }

@@ -9,7 +9,8 @@ struct T2VRequest: Codable {
     var seed: Int = -1
     var guidanceScale: Double = 1.0
     var fps: Int = 24
-    var pipelineType: String = "one-stage"
+    var pipelineType: String = "distilled"
+    var lowRam: Bool = false
     var loraIds: [String] = []
 
     enum CodingKeys: String, CodingKey {
@@ -17,6 +18,7 @@ struct T2VRequest: Codable {
         case numFrames = "num_frames"
         case guidanceScale = "guidance_scale"
         case pipelineType = "pipeline_type"
+        case lowRam = "low_ram"
         case loraIds = "lora_ids"
     }
 }
@@ -32,6 +34,8 @@ struct I2VRequest: Codable {
     var seed: Int = -1
     var guidanceScale: Double = 1.0
     var fps: Int = 24
+    var pipelineType: String = "distilled"
+    var lowRam: Bool = false
     var imageStrength: Double = 1.0
     var loraIds: [String] = []
 
@@ -40,6 +44,8 @@ struct I2VRequest: Codable {
         case sourceImagePath = "source_image_path"
         case numFrames = "num_frames"
         case guidanceScale = "guidance_scale"
+        case pipelineType = "pipeline_type"
+        case lowRam = "low_ram"
         case imageStrength = "image_strength"
         case loraIds = "lora_ids"
     }

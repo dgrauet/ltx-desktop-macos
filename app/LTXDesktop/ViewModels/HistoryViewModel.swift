@@ -46,6 +46,7 @@ class HistoryViewModel: ObservableObject {
                         numFrames: entry.numFrames,
                         fps: entry.fps,
                         durationSeconds: entry.durationSeconds,
+                        generationTimeSeconds: entry.generationTimeSeconds,
                         createdAt: date,
                         generationType: entry.generationType
                     )
@@ -112,6 +113,7 @@ class HistoryViewModel: ObservableObject {
                 numFrames: 0,
                 fps: 24,
                 durationSeconds: 0,
+                generationTimeSeconds: nil,
                 createdAt: created,
                 generationType: "unknown"
             ))

@@ -2,6 +2,30 @@ import SwiftUI
 import AVKit
 import UniformTypeIdentifiers
 
+/// AppKit-backed video player.
+///
+/// Replaces SwiftUI's `VideoPlayer`: its `_AVKit_SwiftUI` generic metadata
+/// instantiation crashed the app (SIGABRT in `getSuperclassMetadata`) on
+/// macOS 26.5.1 when the player first appeared after a generation.
+/// Wrapping `AVPlayerView` directly skips that machinery entirely.
+struct PlayerView: NSViewRepresentable {
+    let player: AVPlayer
+
+    func makeNSView(context: Context) -> AVPlayerView {
+        let view = AVPlayerView()
+        view.player = player
+        view.controlsStyle = .inline
+        view.showsFullScreenToggleButton = true
+        return view
+    }
+
+    func updateNSView(_ view: AVPlayerView, context: Context) {
+        if view.player !== player {
+            view.player = player
+        }
+    }
+}
+
 struct GenerationView: View {
     @EnvironmentObject var backendService: BackendService
     @StateObject private var vm = GenerationViewModel()
@@ -180,15 +204,27 @@ struct GenerationView: View {
                         Text("Pipeline")
                             .font(.subheadline)
                         Picker("", selection: $vm.pipelineType) {
-                            Text("One Stage").tag("one-stage")
-                            Text("Two Stage").tag("two-stage")
+                            Text("Distilled (fast)").tag("distilled")
+                            Text("One Stage (dev)").tag("one-stage")
+                            Text("Two Stage (dev + upscale)").tag("two-stage")
                             Text("Two Stage HQ").tag("two-stage-hq")
                         }
-                        .pickerStyle(.segmented)
+                        .pickerStyle(.menu)
                     }
                     Text(pipelineDescription)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
+                }
+
+                // Low RAM mode (DiT block streaming)
+                VStack(alignment: .leading, spacing: 4) {
+                    Toggle("Low RAM mode", isOn: $vm.lowRam)
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                    Text("Streams model weights from disk (~75% less RAM). Slower, but enables larger models on 16–32 GB Macs.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 // Steps + Seed
@@ -772,12 +808,14 @@ struct GenerationView: View {
 
     private var pipelineDescription: String {
         switch vm.pipelineType {
+        case "one-stage":
+            return "Dev model + CFG at full resolution (30 steps). No upscale stage."
         case "two-stage":
-            return "Dev model (30 steps) + distilled refinement. Better quality, slower."
+            return "Dev model + CFG (30 steps), then neural upscale + refinement. Better quality, slower."
         case "two-stage-hq":
-            return "High quality variant (15 steps) + refinement. Best quality, slowest."
+            return "HQ res_2s sampler (15 steps) + refinement. Best quality, slowest."
         default:
-            return "Distilled model (8 steps). Fast generation, good quality."
+            return "Distilled model (8+3 steps), half-res + neural upscale. Fastest, good quality."
         }
     }
 
@@ -787,7 +825,7 @@ struct GenerationView: View {
         Group {
             if let player = player {
                 ZStack {
-                    VideoPlayer(player: player)
+                    PlayerView(player: player)
                         .clipShape(RoundedRectangle(cornerRadius: 12))
 
                     // Top-right: copy/save/share
@@ -829,6 +867,7 @@ struct GenerationView: View {
                         }
                     }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .sheet(isPresented: $showRetakeSheet) {
                     if let url = vm.outputVideoURL {
                         RetakeSheet(

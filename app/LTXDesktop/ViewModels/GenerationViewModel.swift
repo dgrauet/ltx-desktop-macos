@@ -8,17 +8,21 @@ class GenerationViewModel: ObservableObject {
     @Published var selectedResolution: Resolution = .landscape768
     @Published var numFrames = 97
     @Published var steps = 8
-    @Published var pipelineType = "one-stage" {
+    @Published var pipelineType = "distilled" {
         didSet {
             let newType = pipelineType
             Task { @MainActor in
                 switch newType {
+                case "one-stage": self.steps = 30
                 case "two-stage": self.steps = 30
                 case "two-stage-hq": self.steps = 15
-                default: self.steps = 8
+                default: self.steps = 8  // distilled
                 }
             }
         }
+    }
+    @Published var lowRam: Bool = UserDefaults.standard.bool(forKey: "lowRamEnabled") {
+        didSet { UserDefaults.standard.set(lowRam, forKey: "lowRamEnabled") }
     }
     @Published var fps = 24
     @Published var seed = -1
@@ -154,6 +158,8 @@ class GenerationViewModel: ObservableObject {
                     steps: steps,
                     seed: seed,
                     fps: fps,
+                    pipelineType: pipelineType,
+                    lowRam: lowRam,
                     imageStrength: imageStrength,
                     loraIds: selectedLoRAIdArray
                 )
@@ -168,6 +174,7 @@ class GenerationViewModel: ObservableObject {
                     seed: seed,
                     fps: fps,
                     pipelineType: pipelineType,
+                    lowRam: lowRam,
                     loraIds: selectedLoRAIdArray
                 )
                 submitResponse = try await service.generateTextToVideo(request: request, priority: priority)
