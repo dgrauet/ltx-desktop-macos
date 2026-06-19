@@ -76,6 +76,39 @@ struct A2VRequest: Codable {
     }
 }
 
+struct ICLoraRequest: Codable {
+    var prompt: String
+    var sourceControlPath: String
+    var extractEdges: Bool = false
+    var icLoraPath: String? = nil
+    var icLoraStrength: Double = 1.0
+    var controlStrength: Double = 1.0
+    var conditioningStrength: Double = 1.0
+    var width: Int = 768
+    var height: Int = 512
+    var numFrames: Int = 97
+    var steps: Int = 30
+    var seed: Int = -1
+    var guidanceScale: Double = 3.0
+    var fps: Int = 24
+    var skipStage2: Bool = false
+    var lowRam: Bool = false
+
+    enum CodingKeys: String, CodingKey {
+        case prompt, width, height, steps, seed, fps
+        case sourceControlPath = "source_control_path"
+        case extractEdges = "extract_edges"
+        case icLoraPath = "ic_lora_path"
+        case icLoraStrength = "ic_lora_strength"
+        case controlStrength = "control_strength"
+        case conditioningStrength = "conditioning_strength"
+        case numFrames = "num_frames"
+        case guidanceScale = "guidance_scale"
+        case skipStage2 = "skip_stage_2"
+        case lowRam = "low_ram"
+    }
+}
+
 struct JobResponse: Codable {
     let jobId: String
 
