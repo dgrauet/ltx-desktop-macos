@@ -72,7 +72,7 @@ _KNOWN_MODELS: list[dict[str, Any]] = [
         "id": "ltx-2.3-ic-lora-union-control",
         "name": "LTX-2.3 IC-LoRA Union Control",
         "description": "IC-LoRA for control conditioning (depth/pose/edges) via a reference video.",
-        "size_gb": 1.5,
+        "size_gb": 0.6,
         "model_type": "ic-lora",
         "hf_repo": "Lightricks/LTX-2.3-22b-IC-LoRA-Union-Control",
         "hf_allow_patterns": ["ltx-2.3-22b-ic-lora-union-control-ref0.5.safetensors"],
