@@ -145,6 +145,8 @@ async def run_mlx_generation(
     mode: str = "t2v",
     image: str | None = None,
     image_strength: float = 1.0,
+    audio: str | None = None,
+    audio_start: float = 0.0,
     num_steps: int = 8,
     pipeline_type: str = "distilled",
     cfg_scale: float = 3.0,
@@ -195,6 +197,10 @@ async def run_mlx_generation(
     # I2V args
     if image:
         cmd.extend(["--image", image, "--image-strength", str(image_strength)])
+
+    # A2V args
+    if audio:
+        cmd.extend(["--audio", audio, "--audio-start", str(audio_start)])
 
     # Retake args
     if retake_source:

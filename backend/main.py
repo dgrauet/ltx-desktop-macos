@@ -27,6 +27,7 @@ from engine.memory_manager import aggressive_cleanup, get_memory_stats, memory_p
 from engine.mlx_runner import run_prompt_enhance
 from engine.model_download_manager import ModelDownloadManager
 from engine.model_manager import ModelManager
+from engine.pipelines.audio_to_video import AudioToVideoPipeline
 from engine.pipelines.extend import ExtendPipeline
 from engine.pipelines.image_to_video import ImageToVideoPipeline
 from engine.pipelines.retake import RetakePipeline
@@ -42,6 +43,7 @@ model_manager = ModelManager()
 model_download_manager = ModelDownloadManager()
 t2v_pipeline = TextToVideoPipeline(model_manager)
 i2v_pipeline = ImageToVideoPipeline(model_manager)
+a2v_pipeline = AudioToVideoPipeline(model_manager)
 retake_pipeline = RetakePipeline(model_manager)
 extend_pipeline = ExtendPipeline(model_manager)
 lora_manager = LoRAManager(model_manager)
@@ -118,6 +120,26 @@ class I2VRequest(BaseModel):
     pipeline_type: str = Field(default="distilled", pattern="^(distilled|one-stage|two-stage|two-stage-hq)$")
     low_ram: bool = Field(default=False, description="Stream DiT blocks from disk (less RAM)")
     image_strength: float = Field(default=1.0, ge=0.0, le=1.0)
+    lora_ids: list[str] = Field(default=[], description="LoRA IDs to apply (empty = use active LoRAs)")
+
+
+class A2VRequest(BaseModel):
+    """Audio-to-Video generation request.
+
+    A2V always uses the library's two-stage Euler+CFG pipeline (beta), so it
+    exposes no pipeline_type. ``steps`` is the stage-1 step count (default 30).
+    """
+    prompt: str = Field(..., min_length=1, max_length=2000)
+    source_audio_path: str = Field(..., min_length=1)
+    width: int = Field(default=768, ge=256, le=1920)
+    height: int = Field(default=512, ge=256, le=1920)
+    num_frames: int = Field(default=97, ge=9)
+    steps: int = Field(default=30, ge=1, le=50)
+    seed: int = Field(default=-1, description="Random seed (-1 for random)")
+    guidance_scale: float = Field(default=3.0, ge=0.0, le=20.0)
+    fps: int = Field(default=24, ge=1, le=60)
+    audio_start: float = Field(default=0.0, ge=0.0, description="Audio start time in seconds")
+    low_ram: bool = Field(default=False, description="Stream DiT blocks from disk (less RAM)")
     lora_ids: list[str] = Field(default=[], description="LoRA IDs to apply (empty = use active LoRAs)")
 
 
@@ -827,6 +849,95 @@ async def _run_i2v(job_id: str, req: I2VRequest) -> None:
         jobs[job_id]["status"] = "failed"
         jobs[job_id]["error"] = str(e)
         log.error("I2V %s failed: %s", job_id, e)
+        await _broadcast_progress(job_id, 0, 0, 0.0, error=str(e))
+    finally:
+        memory_pressure_monitor.check_pressure(job_queue)
+
+
+@app.post("/api/v1/generate/audio-to-video", response_model=QueueSubmitResponse)
+async def generate_a2v(req: A2VRequest, priority: str = "normal"):
+    """Submit an audio-to-video generation job to the queue.
+
+    Args:
+        req: Generation parameters.
+        priority: Job priority (high, normal, low). Default: normal.
+    """
+    _check_queue_paused()
+    job_id = str(uuid.uuid4())[:8]
+    pri = _PRIORITY_MAP.get(priority, Priority.NORMAL)
+    jobs[job_id] = {
+        "status": "queued", "progress": 0.0, "result": None, "error": None,
+        "job_type": "a2v", "prompt": req.prompt, "priority": priority,
+    }
+
+    position = await job_queue.submit(
+        job_id=job_id,
+        job_type="a2v",
+        priority=pri,
+        prompt=req.prompt,
+        coroutine_factory=lambda jid=job_id, r=req: _run_a2v(jid, r),
+    )
+
+    return QueueSubmitResponse(
+        job_id=job_id, position=position, queue_length=job_queue.get_queue_length(),
+    )
+
+
+async def _run_a2v(job_id: str, req: A2VRequest) -> None:
+    """Execute A2V generation in background."""
+    jobs[job_id]["status"] = "running"
+    resolved_seed = _resolve_seed(req.seed)
+
+    async def progress_cb(step: int, total: int, pct: float, preview_frame: str | None = None, *, status: str | None = None) -> None:
+        jobs[job_id]["progress"] = pct
+        await _broadcast_progress(job_id, step, total, pct, preview_frame=preview_frame, status=status)
+
+    try:
+        result = await a2v_pipeline.generate(
+            prompt=req.prompt,
+            source_audio_path=req.source_audio_path,
+            width=req.width,
+            height=req.height,
+            num_frames=req.num_frames,
+            steps=req.steps,
+            seed=resolved_seed,
+            guidance_scale=req.guidance_scale,
+            fps=req.fps,
+            audio_start=req.audio_start,
+            low_ram=req.low_ram,
+            lora_args=_resolve_lora_args(req.lora_ids),
+            model_repo_id=selected_video_model,
+            progress_callback=progress_cb,
+        )
+        jobs[job_id]["status"] = "completed"
+        jobs[job_id]["progress"] = 1.0
+        jobs[job_id]["result"] = {
+            "job_id": result.job_id,
+            "output_path": result.output_path,
+            "duration_seconds": result.duration_seconds,
+            "memory_after": result.memory_after,
+            "stages": result.stages,
+        }
+        await _broadcast_progress(job_id, 0, 0, 1.0, done=True)
+        log.info("A2V %s completed in %.2fs", job_id, result.duration_seconds)
+
+        history_store.add_entry(
+            job_id=job_id,
+            prompt=req.prompt,
+            output_path=result.output_path,
+            duration_seconds=result.duration_seconds,
+            width=req.width,
+            height=req.height,
+            num_frames=req.num_frames,
+            fps=req.fps,
+            seed=resolved_seed,
+            generation_type="a2v",
+        )
+
+    except Exception as e:
+        jobs[job_id]["status"] = "failed"
+        jobs[job_id]["error"] = str(e)
+        log.error("A2V %s failed: %s", job_id, e)
         await _broadcast_progress(job_id, 0, 0, 0.0, error=str(e))
     finally:
         memory_pressure_monitor.check_pressure(job_queue)

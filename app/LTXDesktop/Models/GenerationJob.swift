@@ -51,6 +51,31 @@ struct I2VRequest: Codable {
     }
 }
 
+struct A2VRequest: Codable {
+    var prompt: String
+    var sourceAudioPath: String
+    var width: Int = 768
+    var height: Int = 512
+    var numFrames: Int = 97
+    var steps: Int = 30
+    var seed: Int = -1
+    var guidanceScale: Double = 3.0
+    var fps: Int = 24
+    var audioStart: Double = 0.0
+    var lowRam: Bool = false
+    var loraIds: [String] = []
+
+    enum CodingKeys: String, CodingKey {
+        case prompt, width, height, steps, seed, fps
+        case sourceAudioPath = "source_audio_path"
+        case numFrames = "num_frames"
+        case guidanceScale = "guidance_scale"
+        case audioStart = "audio_start"
+        case lowRam = "low_ram"
+        case loraIds = "lora_ids"
+    }
+}
+
 struct JobResponse: Codable {
     let jobId: String
 

@@ -35,6 +35,20 @@ class GenerationViewModel: ObservableObject {
     @Published var progressiveFrame: NSImage?
     @Published var sourceImagePath: String?
     @Published var sourceImageData: Data?
+    /// When set, generation runs in Audio-to-Video mode (beta).
+    /// A2V is a two-stage pipeline, so default to 30 stage-1 steps when audio is
+    /// attached; restore the pipeline-type default when it is cleared.
+    @Published var sourceAudioPath: String? {
+        didSet {
+            if sourceAudioPath != nil {
+                steps = 30
+            } else {
+                let t = pipelineType
+                pipelineType = t  // re-trigger the steps default for the current pipeline
+            }
+        }
+    }
+    @Published var audioStart: Double = 0.0
     @Published var isEnhancing: Bool = false
     @Published var imageStrength: Double = 1.0
     @Published var statusMessage: String?
@@ -150,7 +164,23 @@ class GenerationViewModel: ObservableObject {
         do {
             let submitResponse: QueueSubmitResponse
 
-            if let imagePath = sourceImagePath {
+            if let audioPath = sourceAudioPath {
+                let request = A2VRequest(
+                    prompt: prompt,
+                    sourceAudioPath: audioPath,
+                    width: selectedResolution.width,
+                    height: selectedResolution.height,
+                    numFrames: numFrames,
+                    steps: steps,
+                    seed: seed,
+                    guidanceScale: guidanceScale,
+                    fps: fps,
+                    audioStart: audioStart,
+                    lowRam: lowRam,
+                    loraIds: selectedLoRAIdArray
+                )
+                submitResponse = try await service.generateAudioToVideo(request: request, priority: priority)
+            } else if let imagePath = sourceImagePath {
                 let request = I2VRequest(
                     prompt: prompt,
                     sourceImagePath: imagePath,
@@ -273,6 +303,8 @@ class GenerationViewModel: ObservableObject {
 
     func handleImageDrop(urls: [URL]) {
         guard let url = urls.first else { return }
+        // Image and audio conditioning are mutually exclusive in v1 (I2V vs A2V).
+        sourceAudioPath = nil
         sourceImagePath = url.path
         sourceImageData = try? Data(contentsOf: url)
     }
@@ -280,6 +312,17 @@ class GenerationViewModel: ObservableObject {
     func clearSourceImage() {
         sourceImagePath = nil
         sourceImageData = nil
+    }
+
+    func handleAudioDrop(urls: [URL]) {
+        guard let url = urls.first else { return }
+        // Image and audio conditioning are mutually exclusive in v1 (I2V vs A2V).
+        clearSourceImage()
+        sourceAudioPath = url.path
+    }
+
+    func clearSourceAudio() {
+        sourceAudioPath = nil
     }
 
     // MARK: - Queue Management
