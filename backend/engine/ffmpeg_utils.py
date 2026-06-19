@@ -138,12 +138,25 @@ def extract_edges(
         high: Upper canny threshold (0-1).
 
     Raises:
+        FileNotFoundError: If the input file does not exist.
         RuntimeError: If ffmpeg exits non-zero.
     """
+    # Coerce + clamp thresholds so the interpolated filter text is always a
+    # numeric literal (no filter-graph argument injection from a caller).
+    low_f = max(0.0, min(1.0, float(low)))
+    high_f = max(0.0, min(1.0, float(high)))
+
+    # Resolve paths to absolute and hand them to ffmpeg with an explicit
+    # ``file:`` protocol so they cannot be reinterpreted as options or as a
+    # different protocol (argv / protocol injection).
+    src = Path(input_path).resolve(strict=True)
+    dst = Path(output_path).resolve()
+
     cmd = [
-        "ffmpeg", "-y", "-i", input_path,
-        "-vf", f"edgedetect=low={low}:high={high}",
-        "-an", output_path,
+        find_ffmpeg(), "-y",
+        "-i", f"file:{src}",
+        "-vf", f"edgedetect=low={low_f:.6f}:high={high_f:.6f}",
+        "-an", f"file:{dst}",
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
