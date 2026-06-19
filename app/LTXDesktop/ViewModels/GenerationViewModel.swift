@@ -49,6 +49,22 @@ class GenerationViewModel: ObservableObject {
         }
     }
     @Published var audioStart: Double = 0.0
+    /// When set, generation runs in IC-LoRA control mode.
+    @Published var controlVideoPath: String? {
+        didSet {
+            if controlVideoPath != nil {
+                steps = 30
+            } else {
+                let t = pipelineType
+                pipelineType = t
+            }
+        }
+    }
+    @Published var extractEdges: Bool = false
+    @Published var icLoraStrength: Double = 1.0
+    @Published var controlStrength: Double = 1.0
+    @Published var conditioningStrength: Double = 1.0
+    @Published var skipStage2: Bool = false
     @Published var isEnhancing: Bool = false
     @Published var imageStrength: Double = 1.0
     @Published var statusMessage: String?
@@ -164,7 +180,26 @@ class GenerationViewModel: ObservableObject {
         do {
             let submitResponse: QueueSubmitResponse
 
-            if let audioPath = sourceAudioPath {
+            if let controlPath = controlVideoPath {
+                let request = ICLoraRequest(
+                    prompt: prompt,
+                    sourceControlPath: controlPath,
+                    extractEdges: extractEdges,
+                    icLoraStrength: icLoraStrength,
+                    controlStrength: controlStrength,
+                    conditioningStrength: conditioningStrength,
+                    width: selectedResolution.width,
+                    height: selectedResolution.height,
+                    numFrames: numFrames,
+                    steps: steps,
+                    seed: seed,
+                    guidanceScale: guidanceScale,
+                    fps: fps,
+                    skipStage2: skipStage2,
+                    lowRam: lowRam
+                )
+                submitResponse = try await service.generateICLora(request: request, priority: priority)
+            } else if let audioPath = sourceAudioPath {
                 let request = A2VRequest(
                     prompt: prompt,
                     sourceAudioPath: audioPath,
@@ -305,6 +340,7 @@ class GenerationViewModel: ObservableObject {
         guard let url = urls.first else { return }
         // Image and audio conditioning are mutually exclusive in v1 (I2V vs A2V).
         sourceAudioPath = nil
+        controlVideoPath = nil
         sourceImagePath = url.path
         sourceImageData = try? Data(contentsOf: url)
     }
@@ -318,11 +354,24 @@ class GenerationViewModel: ObservableObject {
         guard let url = urls.first else { return }
         // Image and audio conditioning are mutually exclusive in v1 (I2V vs A2V).
         clearSourceImage()
+        controlVideoPath = nil
         sourceAudioPath = url.path
     }
 
     func clearSourceAudio() {
         sourceAudioPath = nil
+    }
+
+    func handleControlVideoDrop(urls: [URL]) {
+        guard let url = urls.first else { return }
+        // IC-LoRA is mutually exclusive with image/audio conditioning in v1.
+        clearSourceImage()
+        sourceAudioPath = nil
+        controlVideoPath = url.path
+    }
+
+    func clearControlVideo() {
+        controlVideoPath = nil
     }
 
     // MARK: - Queue Management
