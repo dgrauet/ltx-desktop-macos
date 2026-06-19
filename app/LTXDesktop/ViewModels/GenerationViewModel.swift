@@ -65,6 +65,9 @@ class GenerationViewModel: ObservableObject {
     @Published var controlStrength: Double = 1.0
     @Published var conditioningStrength: Double = 1.0
     @Published var skipStage2: Bool = false
+    /// Downloaded IC-LoRAs available for control generation (nil id = Union-Control default).
+    @Published var availableICLoras: [ModelInfo] = []
+    @Published var selectedICLoraId: String? = nil
     @Published var isEnhancing: Bool = false
     @Published var imageStrength: Double = 1.0
     @Published var statusMessage: String?
@@ -185,6 +188,7 @@ class GenerationViewModel: ObservableObject {
                     prompt: prompt,
                     sourceControlPath: controlPath,
                     extractEdges: extractEdges,
+                    icLoraId: selectedICLoraId,
                     icLoraStrength: icLoraStrength,
                     controlStrength: controlStrength,
                     conditioningStrength: conditioningStrength,
@@ -435,6 +439,22 @@ class GenerationViewModel: ObservableObject {
 
     func fetchHardwareLimits(service: BackendService) async {
         hardwareLimits = try? await service.hardwareLimits()
+    }
+
+    // MARK: - IC-LoRA Selection
+
+    /// Fetch downloaded IC-LoRAs (model_type == "ic-lora") for the control-mode picker.
+    func loadICLoras(service: BackendService) async {
+        do {
+            let response = try await service.listModels()
+            availableICLoras = response.models.filter { $0.modelType == "ic-lora" && $0.downloaded }
+            // Drop a stale selection if that IC-LoRA is no longer present.
+            if let sel = selectedICLoraId, !availableICLoras.contains(where: { $0.id == sel }) {
+                selectedICLoraId = nil
+            }
+        } catch {
+            // Silently fail — best-effort.
+        }
     }
 
     // MARK: - LoRA Selection

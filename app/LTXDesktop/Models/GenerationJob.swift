@@ -80,6 +80,7 @@ struct ICLoraRequest: Codable {
     var prompt: String
     var sourceControlPath: String
     var extractEdges: Bool = false
+    var icLoraId: String? = nil
     var icLoraPath: String? = nil
     var icLoraStrength: Double = 1.0
     var controlStrength: Double = 1.0
@@ -98,6 +99,7 @@ struct ICLoraRequest: Codable {
         case prompt, width, height, steps, seed, fps
         case sourceControlPath = "source_control_path"
         case extractEdges = "extract_edges"
+        case icLoraId = "ic_lora_id"
         case icLoraPath = "ic_lora_path"
         case icLoraStrength = "ic_lora_strength"
         case controlStrength = "control_strength"

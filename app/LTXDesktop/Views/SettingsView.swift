@@ -11,6 +11,12 @@ struct SettingsView: View {
     // General — Output directory
     @AppStorage("outputDirectory") private var outputDirectory: String = ""
 
+    // HuggingFace token (for gated IC-LoRA downloads)
+    @State private var hfToken: String = ""
+    @State private var hfStatus: HFTokenStatus?
+    @State private var hfSaving = false
+    @State private var hfError: String?
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 32) {
@@ -137,6 +143,39 @@ struct SettingsView: View {
                         Text("Models are stored in ~/.cache/huggingface/. Deleting a model frees disk space but requires re-download before next use.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                // MARK: - HuggingFace Access
+                settingsSection(title: "HuggingFace Access", icon: "key") {
+                    Text("Required to download gated IC-LoRA models. Paste a token from huggingface.co/settings/tokens (read scope).")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if let s = hfStatus, s.configured {
+                        HStack(spacing: 6) {
+                            Image(systemName: "checkmark.seal.fill")
+                                .foregroundStyle(.green)
+                            Text("Connected" + (s.user.map { " as \($0)" } ?? ""))
+                                .font(.callout)
+                        }
+                    }
+
+                    HStack {
+                        SecureField("hf_…", text: $hfToken)
+                            .textFieldStyle(.roundedBorder)
+                        Button(hfSaving ? "Saving…" : "Save") {
+                            Task { await saveHFToken() }
+                        }
+                        .disabled(hfToken.isEmpty || hfSaving)
+                    }
+
+                    if let e = hfError {
+                        Text(e)
+                            .font(.caption)
+                            .foregroundStyle(.red)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -287,6 +326,7 @@ struct SettingsView: View {
         .onAppear {
             memoryVM.startPolling(service: backendService, isGenerating: false)
             modelsVM.loadModels(service: backendService)
+            Task { hfStatus = try? await backendService.getHFTokenStatus() }
         }
         .onDisappear {
             memoryVM.stopPolling()
@@ -310,6 +350,20 @@ struct SettingsView: View {
         } message: { model in
             Text("Are you sure you want to delete \"\(model.name)\"? This will free approximately \(model.sizeLabel) of disk space. You will need to re-download the model before generating videos.")
         }
+    }
+
+    // MARK: - HuggingFace Token
+
+    private func saveHFToken() async {
+        hfSaving = true
+        hfError = nil
+        do {
+            hfStatus = try await backendService.setHFToken(hfToken)
+            hfToken = ""
+        } catch {
+            hfError = error.localizedDescription
+        }
+        hfSaving = false
     }
 
     // MARK: - Section Builder

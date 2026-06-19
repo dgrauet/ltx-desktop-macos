@@ -60,6 +60,7 @@ struct GenerationView: View {
             await vm.fetchHardwareLimits(service: backendService)
             await vm.loadPresets(service: backendService)
             await vm.fetchLoRAs(service: backendService)
+            await vm.loadICLoras(service: backendService)
         }
         .alert("Save Preset", isPresented: $showSavePresetAlert) {
             TextField("Preset name", text: $newPresetName)
@@ -279,9 +280,28 @@ struct GenerationView: View {
                     }
                 }
 
-                // IC-LoRA strengths (only in IC-LoRA mode)
+                // IC-LoRA selection + strengths (only in IC-LoRA mode)
                 if vm.controlVideoPath != nil {
                     VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Text("IC-LoRA")
+                                .font(.subheadline)
+                            Spacer()
+                            Picker("", selection: $vm.selectedICLoraId) {
+                                Text("Union Control (default)").tag(String?.none)
+                                ForEach(vm.availableICLoras) { lora in
+                                    Text(lora.name).tag(Optional(lora.id))
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .frame(maxWidth: 220)
+                        }
+                        if vm.availableICLoras.isEmpty {
+                            Text("No extra IC-LoRAs downloaded. Get them in Settings → Models.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                         sliderRow("Control strength", value: $vm.controlStrength, range: 0.0...1.0)
                         sliderRow("IC-LoRA strength", value: $vm.icLoraStrength, range: 0.0...2.0)
                         sliderRow("Conditioning", value: $vm.conditioningStrength, range: 0.0...1.0)

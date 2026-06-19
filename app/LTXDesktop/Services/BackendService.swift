@@ -46,6 +46,18 @@ class BackendService: ObservableObject {
         return try await post("/api/v1/system/memory-pressure/resume", body: EmptyBody())
     }
 
+    // MARK: - HuggingFace Token
+
+    func getHFTokenStatus() async throws -> HFTokenStatus {
+        return try await get("/api/v1/system/hf-token")
+    }
+
+    @discardableResult
+    func setHFToken(_ token: String) async throws -> HFTokenStatus {
+        struct Body: Encodable { let token: String }
+        return try await post("/api/v1/system/hf-token", body: Body(token: token))
+    }
+
     // MARK: - Generation
 
     func generateTextToVideo(request: T2VRequest, priority: String = "normal") async throws -> QueueSubmitResponse {

@@ -16,6 +16,7 @@ struct ModelInfo: Identifiable, Codable {
         case "video_generator": return "Video Generator"
         case "text_encoder": return "Text Encoder"
         case "upscaler": return "Upscaler"
+        case "ic-lora": return "IC-LoRA"
         default: return modelType
         }
     }
@@ -26,6 +27,11 @@ struct ModelInfo: Identifiable, Codable {
         case modelType = "model_type"
         case hfRepo = "hf_repo"
     }
+}
+
+struct HFTokenStatus: Codable {
+    let configured: Bool
+    let user: String?
 }
 
 struct ModelListResponse: Codable {
