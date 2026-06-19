@@ -306,6 +306,7 @@ struct QueueJobRow: View {
         switch entry.jobType {
         case "t2v": return .blue
         case "i2v": return .green
+        case "a2v": return .pink
         case "preview": return .orange
         case "retake": return .purple
         case "extend": return .cyan

@@ -93,6 +93,9 @@ struct GenerationView: View {
                 // Image drop zone for I2V
                 imageDropZone
 
+                // Audio drop zone for A2V (beta)
+                audioDropZone
+
                 // Prompt
                 Text("Prompt")
                     .font(.headline)
@@ -198,22 +201,29 @@ struct GenerationView: View {
                     .padding(.horizontal, 4)
                 }
 
-                // Pipeline type
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text("Pipeline")
-                            .font(.subheadline)
-                        Picker("", selection: $vm.pipelineType) {
-                            Text("Distilled (fast)").tag("distilled")
-                            Text("One Stage (dev)").tag("one-stage")
-                            Text("Two Stage (dev + upscale)").tag("two-stage")
-                            Text("Two Stage HQ").tag("two-stage-hq")
+                // Pipeline type — hidden in A2V mode (A2V uses its own two-stage pipeline)
+                if vm.sourceAudioPath == nil {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("Pipeline")
+                                .font(.subheadline)
+                            Picker("", selection: $vm.pipelineType) {
+                                Text("Distilled (fast)").tag("distilled")
+                                Text("One Stage (dev)").tag("one-stage")
+                                Text("Two Stage (dev + upscale)").tag("two-stage")
+                                Text("Two Stage HQ").tag("two-stage-hq")
+                            }
+                            .pickerStyle(.menu)
                         }
-                        .pickerStyle(.menu)
+                        Text(pipelineDescription)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                     }
-                    Text(pipelineDescription)
+                } else {
+                    Text("Audio-to-Video uses a dedicated two-stage pipeline (beta). Pipeline selection is disabled.")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 // Low RAM mode (DiT block streaming)
@@ -245,9 +255,9 @@ struct GenerationView: View {
                         .textFieldStyle(.roundedBorder)
                 }
 
-                // Guidance scale (CFG) — only dev/two-stage pipelines use CFG;
+                // Guidance scale (CFG) — dev/two-stage pipelines and A2V use CFG;
                 // the distilled pipeline ignores it.
-                if vm.pipelineType != "distilled" {
+                if vm.pipelineType != "distilled" || vm.sourceAudioPath != nil {
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
                             Text("Guidance")
@@ -809,6 +819,98 @@ struct GenerationView: View {
         panel.message = "Select an image for Image-to-Video"
         if panel.runModal() == .OK, let url = panel.url {
             vm.handleImageDrop(urls: [url])
+        }
+    }
+
+    // MARK: - Audio Drop Zone (A2V, beta)
+
+    private var audioDropZone: some View {
+        Group {
+            if let audioPath = vm.sourceAudioPath {
+                HStack(spacing: 8) {
+                    Image(systemName: "waveform")
+                        .font(.title2)
+                        .foregroundStyle(.purple)
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 6) {
+                            Text("Source Audio")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text("BETA")
+                                .font(.caption2)
+                                .fontWeight(.bold)
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1)
+                                .background(Color.purple.opacity(0.15))
+                                .foregroundStyle(.purple)
+                                .clipShape(RoundedRectangle(cornerRadius: 3))
+                        }
+                        Text(audioPath.components(separatedBy: "/").last ?? "audio")
+                            .font(.caption2)
+                            .lineLimit(1)
+                        Button("Clear") {
+                            vm.clearSourceAudio()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                    Spacer()
+                }
+                .padding(8)
+                .background(Color(.controlBackgroundColor).opacity(0.5))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            } else {
+                VStack(spacing: 6) {
+                    Image(systemName: "waveform.badge.plus")
+                        .font(.title2)
+                        .foregroundStyle(.secondary)
+                    Text("Drop or click to add audio (A2V, beta)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: 70)
+                .background(Color(.controlBackgroundColor).opacity(0.3))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [6, 3]))
+                        .foregroundStyle(.secondary.opacity(0.4))
+                )
+                .onTapGesture {
+                    showAudioPicker()
+                }
+                .onDrop(of: [UTType.fileURL], isTargeted: nil) { providers in
+                    handleAudioDrop(providers: providers)
+                    return true
+                }
+            }
+        }
+    }
+
+    private func showAudioPicker() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.audio]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.message = "Select an audio track for Audio-to-Video"
+        if panel.runModal() == .OK, let url = panel.url {
+            vm.handleAudioDrop(urls: [url])
+        }
+    }
+
+    private func handleAudioDrop(providers: [NSItemProvider]) {
+        guard let provider = providers.first else { return }
+        provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { data, _ in
+            guard let urlData = data as? Data,
+                  let url = URL(dataRepresentation: urlData, relativeTo: nil) else { return }
+
+            let audioTypes = ["wav", "mp3", "m4a", "aac", "flac", "aiff", "aif", "ogg"]
+            guard audioTypes.contains(url.pathExtension.lowercased()) else { return }
+
+            DispatchQueue.main.async {
+                vm.handleAudioDrop(urls: [url])
+            }
         }
     }
 

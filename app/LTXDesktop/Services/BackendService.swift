@@ -56,6 +56,10 @@ class BackendService: ObservableObject {
         return try await post("/api/v1/generate/image-to-video?priority=\(priority)", body: request)
     }
 
+    func generateAudioToVideo(request: A2VRequest, priority: String = "normal") async throws -> QueueSubmitResponse {
+        return try await post("/api/v1/generate/audio-to-video?priority=\(priority)", body: request)
+    }
+
     func getJobStatus(jobId: String) async throws -> JobStatus {
         return try await get("/api/v1/queue/\(jobId)")
     }

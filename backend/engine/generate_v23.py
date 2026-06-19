@@ -109,6 +109,7 @@ def _create_pipeline(args: argparse.Namespace):
     folded into RetakePipeline.
     """
     from ltx_pipelines_mlx import (
+        A2VidPipelineTwoStage,
         DistilledPipeline,
         RetakePipeline,
         TI2VidOneStagePipeline,
@@ -126,6 +127,9 @@ def _create_pipeline(args: argparse.Namespace):
 
     if args.mode in ("retake", "extend"):
         return RetakePipeline(model_dir, **common)
+    elif args.mode == "a2v":
+        # A2V is its own two-stage Euler+CFG pipeline; it ignores pipeline_type.
+        return A2VidPipelineTwoStage(model_dir, **common)
     elif pipeline_type == "two-stage":
         return TI2VidTwoStagesPipeline(model_dir, **common)
     elif pipeline_type == "two-stage-hq":
@@ -188,6 +192,51 @@ def _run_t2v(pipeline, args: argparse.Namespace) -> None:
         # ``image=`` shorthand hardcodes strength=1.0, so to honor a user-set
         # strength we build the ImageConditioningInput explicitly. strength=1.0
         # reproduces the shorthand exactly.
+        from ltx_pipelines_mlx.utils.args import ImageConditioningInput
+
+        gen_kwargs["images"] = [
+            ImageConditioningInput(
+                path=args.image, frame_idx=0, strength=args.image_strength,
+            )
+        ]
+
+    pipeline.generate_and_save(**gen_kwargs)
+
+    _report_memory("after_generation")
+    _progress("STATUS:Done")
+
+
+def _run_a2v(pipeline, args: argparse.Namespace) -> None:
+    """Audio-to-video generation (two-stage Euler + CFG, beta)."""
+    global _current_stage
+
+    _progress("STATUS:Loading model")
+    _report_memory("before_load")
+
+    _set_loras(pipeline, args)
+    pipeline.load()
+
+    _report_memory("after_model_load")
+    _current_stage = 1
+    _progress("STATUS:Generating video")
+
+    gen_kwargs: dict = {
+        "prompt": args.prompt,
+        "output_path": args.output_path,
+        "audio_path": args.audio,
+        "audio_start_time": args.audio_start,
+        "height": args.height,
+        "width": args.width,
+        "num_frames": args.num_frames,
+        "frame_rate": float(args.fps),
+        "seed": args.seed,
+        "stage1_steps": args.num_steps,
+        "cfg_scale": args.cfg_scale,
+        "stg_scale": args.stg_scale,
+    }
+
+    # Optional reference image — A2V also supports I2V conditioning.
+    if args.image:
         from ltx_pipelines_mlx.utils.args import ImageConditioningInput
 
         gen_kwargs["images"] = [
@@ -332,7 +381,7 @@ def _run_enhance(args: argparse.Namespace) -> None:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="LTX-2.3 generation subprocess")
 
-    parser.add_argument("--mode", choices=["t2v", "i2v", "retake", "extend", "enhance"],
+    parser.add_argument("--mode", choices=["t2v", "i2v", "a2v", "retake", "extend", "enhance"],
                         default="t2v", help="Pipeline mode")
     parser.add_argument("--prompt", required=True)
     parser.add_argument("--model-dir", required=True, help="HF model path or repo ID")
@@ -359,6 +408,11 @@ def _build_parser() -> argparse.ArgumentParser:
     # I2V
     parser.add_argument("--image", default=None, help="Reference image path for I2V")
     parser.add_argument("--image-strength", type=float, default=1.0)
+
+    # A2V
+    parser.add_argument("--audio", default=None, help="Reference audio path for A2V")
+    parser.add_argument("--audio-start", type=float, default=0.0,
+                        help="Audio start time in seconds")
 
     # Retake
     parser.add_argument("--retake-source", default=None, help="Source video for retake")
@@ -396,6 +450,8 @@ def main() -> None:
         _run_retake(pipeline, args)
     elif args.mode == "extend":
         _run_extend(pipeline, args)
+    elif args.mode == "a2v":
+        _run_a2v(pipeline, args)
     else:
         _run_t2v(pipeline, args)
 
