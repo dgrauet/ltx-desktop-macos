@@ -184,7 +184,17 @@ def _run_t2v(pipeline, args: argparse.Namespace) -> None:
         gen_kwargs["stage1_steps"] = args.num_steps
 
     if args.mode == "i2v" and args.image:
-        gen_kwargs["image"] = args.image
+        # Pass the reference image with its conditioning strength. The library's
+        # ``image=`` shorthand hardcodes strength=1.0, so to honor a user-set
+        # strength we build the ImageConditioningInput explicitly. strength=1.0
+        # reproduces the shorthand exactly.
+        from ltx_pipelines_mlx.utils.args import ImageConditioningInput
+
+        gen_kwargs["images"] = [
+            ImageConditioningInput(
+                path=args.image, frame_idx=0, strength=args.image_strength,
+            )
+        ]
 
     pipeline.generate_and_save(**gen_kwargs)
 

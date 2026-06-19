@@ -20,17 +20,17 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
-from engine.memory_manager import aggressive_cleanup, get_memory_stats, memory_pressure_monitor
-from engine.model_manager import ModelManager
-from engine.model_download_manager import ModelDownloadManager
 import history_store
 import preset_manager
-from engine.pipelines.text_to_video import TextToVideoPipeline
+from engine.lora_manager import LoRAManager
+from engine.memory_manager import aggressive_cleanup, get_memory_stats, memory_pressure_monitor
+from engine.mlx_runner import run_prompt_enhance
+from engine.model_download_manager import ModelDownloadManager
+from engine.model_manager import ModelManager
+from engine.pipelines.extend import ExtendPipeline
 from engine.pipelines.image_to_video import ImageToVideoPipeline
 from engine.pipelines.retake import RetakePipeline
-from engine.pipelines.extend import ExtendPipeline
-from engine.mlx_runner import run_prompt_enhance
-from engine.lora_manager import LoRAManager
+from engine.pipelines.text_to_video import TextToVideoPipeline
 from job_queue import JobQueue, Priority
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -96,7 +96,7 @@ class T2VRequest(BaseModel):
     num_frames: int = Field(default=97, ge=9)
     steps: int = Field(default=8, ge=1, le=50)
     seed: int = Field(default=-1, description="Random seed (-1 for random)")
-    guidance_scale: float = Field(default=1.0, ge=0.0, le=20.0)
+    guidance_scale: float = Field(default=3.0, ge=0.0, le=20.0)
     fps: int = Field(default=24, ge=1, le=60)
     pipeline_type: str = Field(default="distilled", pattern="^(distilled|one-stage|two-stage|two-stage-hq)$")
     low_ram: bool = Field(default=False, description="Stream DiT blocks from disk (less RAM)")
@@ -113,7 +113,7 @@ class I2VRequest(BaseModel):
     num_frames: int = Field(default=97, ge=9)
     steps: int = Field(default=8, ge=1, le=50)
     seed: int = Field(default=-1, description="Random seed (-1 for random)")
-    guidance_scale: float = Field(default=1.0, ge=0.0, le=20.0)
+    guidance_scale: float = Field(default=3.0, ge=0.0, le=20.0)
     fps: int = Field(default=24, ge=1, le=60)
     pipeline_type: str = Field(default="distilled", pattern="^(distilled|one-stage|two-stage|two-stage-hq)$")
     low_ram: bool = Field(default=False, description="Stream DiT blocks from disk (less RAM)")

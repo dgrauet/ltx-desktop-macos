@@ -7,7 +7,7 @@ struct T2VRequest: Codable {
     var numFrames: Int = 97
     var steps: Int = 8
     var seed: Int = -1
-    var guidanceScale: Double = 1.0
+    var guidanceScale: Double = 3.0
     var fps: Int = 24
     var pipelineType: String = "distilled"
     var lowRam: Bool = false
@@ -32,7 +32,7 @@ struct I2VRequest: Codable {
     var numFrames: Int = 97
     var steps: Int = 8
     var seed: Int = -1
-    var guidanceScale: Double = 1.0
+    var guidanceScale: Double = 3.0
     var fps: Int = 24
     var pipelineType: String = "distilled"
     var lowRam: Bool = false

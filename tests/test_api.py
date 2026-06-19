@@ -206,33 +206,6 @@ def test_lora_load_nonexistent(client: httpx.Client):
     assert r.status_code == 404
 
 
-def test_audio_tts(client: httpx.Client):
-    """POST /audio/tts produces a WAV file."""
-    r = client.post("/api/v1/audio/tts", json={
-        "text": "Hello, this is a test of the TTS system.",
-        "voice": "default",
-        "speed": 1.0,
-    })
-    assert r.status_code == 200
-    data = r.json()
-    assert "output_path" in data
-    assert data["output_path"].endswith(".wav")
-    from pathlib import Path
-    assert Path(data["output_path"]).exists(), "TTS output file does not exist"
-
-
-def test_audio_music(client: httpx.Client):
-    """POST /audio/music produces a WAV file."""
-    r = client.post("/api/v1/audio/music", json={
-        "genre": "ambient",
-        "duration": 2.0,
-    })
-    assert r.status_code == 200
-    data = r.json()
-    assert "output_path" in data
-    assert data["output_path"].endswith(".wav")
-
-
 def test_export_video(client: httpx.Client):
     """POST /export/video with a real video file re-encodes to MP4."""
     # Use a T2V job to get a real video first

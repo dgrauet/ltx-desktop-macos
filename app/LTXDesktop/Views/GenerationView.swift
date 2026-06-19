@@ -245,6 +245,27 @@ struct GenerationView: View {
                         .textFieldStyle(.roundedBorder)
                 }
 
+                // Guidance scale (CFG) — only dev/two-stage pipelines use CFG;
+                // the distilled pipeline ignores it.
+                if vm.pipelineType != "distilled" {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("Guidance")
+                                .font(.subheadline)
+                            Spacer()
+                            Text(String(format: "%.1f", vm.guidanceScale))
+                                .font(.subheadline)
+                                .monospacedDigit()
+                                .foregroundStyle(.secondary)
+                        }
+                        Slider(value: $vm.guidanceScale, in: 1.0...10.0, step: 0.5)
+                        Text("CFG strength. Higher = follows the prompt more closely (3.0 is the default).")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
                 // Image Strength (only when I2V)
                 if vm.sourceImagePath != nil {
                     VStack(alignment: .leading, spacing: 4) {

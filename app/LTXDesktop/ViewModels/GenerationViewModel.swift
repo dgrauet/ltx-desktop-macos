@@ -26,6 +26,8 @@ class GenerationViewModel: ObservableObject {
     }
     @Published var fps = 24
     @Published var seed = -1
+    /// CFG guidance scale. Only affects dev/two-stage pipelines (distilled ignores CFG).
+    @Published var guidanceScale: Double = 3.0
     @Published var isGenerating = false
     @Published var progress: Double = 0
     @Published var errorMessage: String?
@@ -157,6 +159,7 @@ class GenerationViewModel: ObservableObject {
                     numFrames: numFrames,
                     steps: steps,
                     seed: seed,
+                    guidanceScale: guidanceScale,
                     fps: fps,
                     pipelineType: pipelineType,
                     lowRam: lowRam,
@@ -172,6 +175,7 @@ class GenerationViewModel: ObservableObject {
                     numFrames: numFrames,
                     steps: steps,
                     seed: seed,
+                    guidanceScale: guidanceScale,
                     fps: fps,
                     pipelineType: pipelineType,
                     lowRam: lowRam,

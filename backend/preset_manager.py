@@ -10,7 +10,7 @@ import json
 import logging
 import threading
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -165,7 +165,7 @@ def create_preset(name: str, params: dict[str, Any]) -> dict[str, Any]:
         "id": preset_id,
         "name": name,
         "builtin": False,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "params": params,
     }
 

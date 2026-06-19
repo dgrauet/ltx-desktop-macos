@@ -11,9 +11,10 @@ import asyncio
 import logging
 import time
 from collections import deque
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from enum import IntEnum
-from typing import Any, Callable, Coroutine
+from typing import Any
 
 log = logging.getLogger(__name__)
 

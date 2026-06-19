@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -87,7 +87,7 @@ def add_entry(
         "fps": fps,
         "seed": seed,
         "generation_type": generation_type,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
     }
 
     with _lock:
@@ -159,7 +159,7 @@ def seed_from_existing_files() -> int:
                     gen_type = "t2v"
 
                 stat = mp4.stat()
-                created = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
+                created = datetime.fromtimestamp(stat.st_mtime, tz=UTC)
 
                 entries.append({
                     "job_id": job_id,
