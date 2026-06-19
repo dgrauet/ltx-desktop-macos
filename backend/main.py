@@ -154,7 +154,8 @@ class ICLoraRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=2000)
     source_control_path: str = Field(..., min_length=1)
     extract_edges: bool = Field(default=False, description="Render canny edges from the source video")
-    ic_lora_path: str | None = Field(default=None, description="Local IC-LoRA path; None = downloaded Union-Control")
+    ic_lora_id: str | None = Field(default=None, description="Downloaded IC-LoRA id")
+    ic_lora_path: str | None = Field(default=None, description="Explicit local path")
     ic_lora_strength: float = Field(default=1.0, ge=0.0, le=2.0)
     control_strength: float = Field(default=1.0, ge=0.0, le=1.0)
     conditioning_strength: float = Field(default=1.0, ge=0.0, le=1.0)
@@ -434,6 +435,50 @@ async def resume_memory_pressure_pause():
     """Manually resume a queue paused by memory pressure."""
     resumed = memory_pressure_monitor.manual_resume(job_queue)
     return {"resumed": resumed, **memory_pressure_monitor.get_state()}
+
+
+class HFTokenRequest(BaseModel):
+    """Request carrying a HuggingFace access token."""
+    token: str = Field(..., min_length=1)
+
+
+@app.get("/api/v1/system/hf-token")
+async def hf_token_status():
+    """Report whether a HuggingFace token is configured (for gated downloads).
+
+    Returns ``configured`` and, when configured, the authenticated ``user``.
+    Never returns the token itself.
+    """
+    from huggingface_hub import whoami
+
+    try:
+        info = whoami()
+        return {"configured": True, "user": info.get("name")}
+    except Exception:
+        return {"configured": False, "user": None}
+
+
+@app.post("/api/v1/system/hf-token")
+async def set_hf_token(req: HFTokenRequest):
+    """Store a HuggingFace token so gated IC-LoRA repos can be downloaded.
+
+    Validates and persists the token via ``huggingface_hub.login`` (writes the
+    standard HF token file, picked up automatically by all future downloads).
+    The token is never logged.
+    """
+    from huggingface_hub import login, whoami
+
+    try:
+        login(token=req.token, add_to_git_credential=False)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid HuggingFace token: {e}") from e
+    try:
+        info = whoami()
+        user = info.get("name")
+    except Exception:
+        user = None
+    log.info("HuggingFace token configured (user=%s)", user)
+    return {"configured": True, "user": user}
 
 
 @app.get("/api/v1/system/hardware-limits", response_model=HardwareLimitsResponse)
@@ -993,7 +1038,7 @@ async def _run_ic_lora(job_id: str, req: ICLoraRequest) -> None:
     jobs[job_id]["status"] = "running"
     resolved_seed = _resolve_seed(req.seed)
 
-    lora_path = req.ic_lora_path or resolve_ic_lora_path()
+    lora_path = req.ic_lora_path or resolve_ic_lora_path(req.ic_lora_id)
     if not lora_path:
         jobs[job_id]["status"] = "failed"
         msg = "IC-LoRA Union-Control not downloaded — download it in Settings."

@@ -197,18 +197,28 @@ def _is_downloaded(model_def: dict[str, Any]) -> bool:
         return False
 
 
-def resolve_ic_lora_path() -> str | None:
-    """Return the local path to the downloaded Union-Control IC-LoRA, or None.
+def resolve_ic_lora_path(model_id: str | None = None) -> str | None:
+    """Return the local ``.safetensors`` path of a downloaded IC-LoRA, or None.
 
-    Returns the cached ``.safetensors`` path if the union-control repo file is
-    present in the HF cache, else None.
+    Args:
+        model_id: A known IC-LoRA model id (see ``_KNOWN_MODELS``). When None,
+            defaults to the Union-Control IC-LoRA.
+
+    Returns:
+        The cached path if the IC-LoRA's safetensors file is present in the HF
+        cache, else None (not downloaded, or unknown/non-ic-lora id).
     """
     from huggingface_hub import try_to_load_from_cache
 
-    cached = try_to_load_from_cache(
-        "Lightricks/LTX-2.3-22b-IC-LoRA-Union-Control",
-        "ltx-2.3-22b-ic-lora-union-control-ref0.5.safetensors",
-    )
+    if model_id is None:
+        model_id = "ltx-2.3-ic-lora-union-control"
+    entry = next((m for m in _KNOWN_MODELS if m["id"] == model_id), None)
+    if entry is None or entry.get("model_type") != "ic-lora":
+        return None
+    patterns = entry.get("hf_allow_patterns") or []
+    if not patterns:
+        return None
+    cached = try_to_load_from_cache(entry["hf_repo"], patterns[0])
     return cached if isinstance(cached, str) else None
 
 
