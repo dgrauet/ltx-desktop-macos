@@ -20,26 +20,21 @@ class ProcessManager: ObservableObject {
         try? kill.run()
         kill.waitUntilExit()
 
-        // Walk up from bundle path to find project root containing backend/main.py.
-        // This works both in DerivedData (dev) and when the app is bundled.
         guard let backendDir = findBackendDir() else {
             lastError = "Backend directory not found. Make sure backend/main.py exists in the project."
             return
         }
 
-        // Use the venv Python directly to avoid uv re-syncing the lockfile
-        // (uv run would revert manually pip-installed packages to lockfile versions)
-        let venvPython = backendDir.appendingPathComponent(".venv/bin/python").path
-        guard FileManager.default.fileExists(atPath: venvPython) else {
-            lastError = "Python venv not found at \(venvPython). Run scripts/setup.sh first."
+        guard let pythonURL = findPythonExecutable(for: backendDir) else {
+            lastError = "Python runtime not found. Run scripts/setup.sh (dev) or reinstall the app (release)."
             return
         }
 
         let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: venvPython)
+        proc.executableURL = pythonURL
         proc.arguments = ["-m", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8000"]
         proc.currentDirectoryURL = backendDir
-        proc.environment = ProcessInfo.processInfo.environment
+        proc.environment = backendEnvironment(for: backendDir)
 
         // Pipe stdout/stderr and read asynchronously so the buffer never fills
         let pipe = Pipe()
@@ -124,9 +119,20 @@ class ProcessManager: ObservableObject {
         }
     }
 
+    private func bundledResourcesURL() -> URL? {
+        Bundle.main.resourceURL
+    }
+
     private func findBackendDir() -> URL? {
-        // Primary: use compile-time source path (#file = …/app/LTXDesktop/Services/ProcessManager.swift)
-        // Going up 4 levels: Services → LTXDesktop → app → project root
+        // Release layout: Contents/Resources/backend
+        if let resources = bundledResourcesURL() {
+            let bundled = resources.appendingPathComponent("backend")
+            if FileManager.default.fileExists(atPath: bundled.appendingPathComponent("main.py").path) {
+                return bundled
+            }
+        }
+
+        // Dev layout: walk up from compile-time source path
         let sourceFile = URL(fileURLWithPath: #file)
         let projectRoot = sourceFile
             .deletingLastPathComponent()
@@ -137,7 +143,8 @@ class ProcessManager: ObservableObject {
         if FileManager.default.fileExists(atPath: candidate.appendingPathComponent("main.py").path) {
             return candidate
         }
-        // Fallback: check a sibling of the .app bundle (distribution layout)
+
+        // Legacy layout: sibling of the .app bundle
         let bundleSibling = URL(fileURLWithPath: Bundle.main.bundlePath)
             .deletingLastPathComponent()
             .appendingPathComponent("backend")
@@ -145,6 +152,46 @@ class ProcessManager: ObservableObject {
             return bundleSibling
         }
         return nil
+    }
+
+    private func findPythonExecutable(for backendDir: URL) -> URL? {
+        if let resources = bundledResourcesURL(),
+           backendDir.path.hasPrefix(resources.path) {
+            let bundledPython = resources.appendingPathComponent("python/bin/python3")
+            if FileManager.default.fileExists(atPath: bundledPython.path) {
+                return bundledPython
+            }
+        }
+
+        let venvPython = backendDir.appendingPathComponent(".venv/bin/python")
+        if FileManager.default.fileExists(atPath: venvPython.path) {
+            return venvPython
+        }
+        return nil
+    }
+
+    private func backendEnvironment(for backendDir: URL) -> [String: String] {
+        var env = ProcessInfo.processInfo.environment
+
+        if let resources = bundledResourcesURL(),
+           backendDir.path.hasPrefix(resources.path) {
+            let binDir = resources.appendingPathComponent("bin").path
+            let existingPath = env["PATH"] ?? ""
+            env["PATH"] = existingPath.isEmpty ? binDir : "\(binDir):\(existingPath)"
+            env["LTX_PYTHON"] = resources.appendingPathComponent("python/bin/python3").path
+            env["LTX_FFMPEG_PATH"] = resources.appendingPathComponent("bin/ffmpeg").path
+            env["LTX_FFPROBE_PATH"] = resources.appendingPathComponent("bin/ffprobe").path
+        } else {
+            for extra in ["/opt/homebrew/bin", "/usr/local/bin"] {
+                let existingPath = env["PATH"] ?? ""
+                if !existingPath.contains(extra) {
+                    env["PATH"] = existingPath.isEmpty ? extra : "\(extra):\(existingPath)"
+                }
+            }
+        }
+
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        return env
     }
 
     deinit {

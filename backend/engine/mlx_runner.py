@@ -108,13 +108,29 @@ def _is_quantized_model(model_dir: Path) -> bool:
     return (model_dir / "quantize_config.json").exists()
 
 
-def get_venv_python() -> str:
-    """Auto-detect the venv Python binary."""
+def get_python_binary() -> str:
+    """Auto-detect the Python binary for generation subprocesses."""
+    if override := os.environ.get("LTX_PYTHON"):
+        return override
+
     backend_dir = Path(__file__).resolve().parent.parent
     venv_python = backend_dir / ".venv" / "bin" / "python"
     if venv_python.exists():
         return str(venv_python)
-    raise FileNotFoundError(f"No venv Python at {venv_python}")
+
+    bundled_python = backend_dir.parent / "python" / "bin" / "python3"
+    if bundled_python.exists():
+        return str(bundled_python)
+
+    raise FileNotFoundError(
+        f"No Python runtime found for backend at {backend_dir} "
+        "(expected .venv/bin/python or bundled python/bin/python3)"
+    )
+
+
+def get_venv_python() -> str:
+    """Backward-compatible alias for :func:`get_python_binary`."""
+    return get_python_binary()
 
 
 # ---------------------------------------------------------------------------
