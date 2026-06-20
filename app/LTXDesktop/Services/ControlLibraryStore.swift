@@ -82,7 +82,7 @@ actor ControlLibraryStore {
         let reader = try AVAssetReader(asset: asset)
         let out = AVAssetReaderTrackOutput(track: track, outputSettings: nil)
         reader.add(out)
-        return try await Task.detached(priority: .userInitiated) {
+        return await Task.detached(priority: .userInitiated) {
             reader.startReading()
             var n = 0
             while out.copyNextSampleBuffer() != nil { n += 1 }
