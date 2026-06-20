@@ -30,6 +30,7 @@ enum ControlProcessingError: Error { case unreadable, writeFailed, unsupportedTy
 actor ControlVideoProcessor {
 
     private let ciContext = CIContext()
+    private var depthExtractor: DepthExtractor?
 
     func process(_ inputURL: URL, type: ControlType,
                  progress: @escaping (Double) -> Void) async throws -> URL {
@@ -43,6 +44,11 @@ actor ControlVideoProcessor {
         let width = Int(abs(size.width)), height = Int(abs(size.height))
         let fps = try await track.load(.nominalFrameRate)
         let totalFrames = try await estimateFrameCount(asset: asset, track: track, fps: fps)
+
+        if type == .depth {
+            let model = try await CoreMLModelManager.shared.depthModel(progress: progress)
+            depthExtractor = try DepthExtractor(model: model)
+        }
 
         // Reader
         let reader = try AVAssetReader(asset: asset)
@@ -105,6 +111,9 @@ actor ControlVideoProcessor {
         switch type {
         case .pose:
             return try PoseRenderer.skeleton(from: pixelBuffer, width: width, height: height)
+        case .depth:
+            guard let extractor = depthExtractor else { throw ControlProcessingError.unsupportedType }
+            return try extractor.depthMap(from: pixelBuffer, width: width, height: height)
         default:
             let ci = CIImage(cvPixelBuffer: pixelBuffer)
             guard let cg = ciContext.createCGImage(ci, from: ci.extent) else {

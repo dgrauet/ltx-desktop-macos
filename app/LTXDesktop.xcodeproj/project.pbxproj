@@ -11,6 +11,7 @@
 		0AAC86242F5C6215008A3AFC /* LoRAView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AAC86232F5C6215008A3AFC /* LoRAView.swift */; };
 		0AAC86262F5C6216008A3AFC /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AAC86252F5C6216008A3AFC /* SettingsView.swift */; };
 		139231FC0B4ECDABC014B84D /* ControlVideoProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DAC688BC7819600CE3677B8 /* ControlVideoProcessor.swift */; };
+		549CB28D7CA81B0B6371C5E5 /* DepthExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2890DBD04F245A9D4774FE30 /* DepthExtractor.swift */; };
 		813ADB5575FD0CA88B67A75E /* CoreMLModelManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 150ADC61E3398DAB809A4539 /* CoreMLModelManager.swift */; };
 		A100000001 /* LTXDesktopApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000001 /* LTXDesktopApp.swift */; };
 		A100000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000002 /* ContentView.swift */; };
@@ -45,6 +46,7 @@
 		0AAC86232F5C6215008A3AFC /* LoRAView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoRAView.swift; sourceTree = "<group>"; };
 		0AAC86252F5C6216008A3AFC /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		150ADC61E3398DAB809A4539 /* CoreMLModelManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = CoreMLModelManager.swift; path = LTXDesktop/Services/CoreMLModelManager.swift; sourceTree = "<group>"; };
+		2890DBD04F245A9D4774FE30 /* DepthExtractor.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = DepthExtractor.swift; path = LTXDesktop/Services/DepthExtractor.swift; sourceTree = "<group>"; };
 		3DAC688BC7819600CE3677B8 /* ControlVideoProcessor.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ControlVideoProcessor.swift; path = LTXDesktop/Services/ControlVideoProcessor.swift; sourceTree = "<group>"; };
 		A200000001 /* LTXDesktopApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LTXDesktopApp.swift; sourceTree = "<group>"; };
 		A200000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -94,6 +96,7 @@
 				3DAC688BC7819600CE3677B8 /* ControlVideoProcessor.swift */,
 				DB2799F16C3811C0A9B062F6 /* PoseRenderer.swift */,
 				150ADC61E3398DAB809A4539 /* CoreMLModelManager.swift */,
+				2890DBD04F245A9D4774FE30 /* DepthExtractor.swift */,
 			);
 			sourceTree = "<group>";
 		};
@@ -279,6 +282,7 @@
 				139231FC0B4ECDABC014B84D /* ControlVideoProcessor.swift in Sources */,
 				F528D06DFB5A19B52DEDA7A1 /* PoseRenderer.swift in Sources */,
 				813ADB5575FD0CA88B67A75E /* CoreMLModelManager.swift in Sources */,
+				549CB28D7CA81B0B6371C5E5 /* DepthExtractor.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
