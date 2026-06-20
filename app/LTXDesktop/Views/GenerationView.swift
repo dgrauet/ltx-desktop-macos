@@ -969,9 +969,13 @@ struct GenerationView: View {
                         }
                         Spacer()
                     }
-                    Toggle("Extract edges (canny) from this video", isOn: $vm.extractEdges)
-                        .toggleStyle(.switch)
-                        .controlSize(.small)
+                    Picker("Control type", selection: $vm.controlType) {
+                        ForEach(ControlType.allCases) { type in
+                            Text(type.label).tag(type)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .controlSize(.small)
                 }
                 .padding(8)
                 .background(Color(.controlBackgroundColor).opacity(0.5))

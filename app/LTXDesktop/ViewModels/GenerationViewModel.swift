@@ -60,7 +60,9 @@ class GenerationViewModel: ObservableObject {
             }
         }
     }
-    @Published var extractEdges: Bool = false
+    /// IC-LoRA control signal source. Pose/Depth are extracted on-device; Canny in backend.
+    @Published var controlType: ControlType = .raw
+    private let controlProcessor = ControlVideoProcessor()
     @Published var icLoraStrength: Double = 1.0
     @Published var controlStrength: Double = 1.0
     @Published var conditioningStrength: Double = 1.0
@@ -184,10 +186,30 @@ class GenerationViewModel: ObservableObject {
             let submitResponse: QueueSubmitResponse
 
             if let controlPath = controlVideoPath {
+                var submitPath = controlPath
+                var backendCanny = false
+                if controlType.needsSwiftPreprocess {
+                    statusMessage = "Preprocessing control video…"
+                    do {
+                        let processed = try await controlProcessor.process(
+                            URL(fileURLWithPath: controlPath), type: controlType
+                        ) { [weak self] p in
+                            Task { @MainActor in self?.progress = p }
+                        }
+                        submitPath = processed.path
+                    } catch {
+                        errorMessage = "Control preprocessing failed: \(error.localizedDescription)"
+                        isGenerating = false
+                        statusMessage = nil
+                        return
+                    }
+                } else {
+                    backendCanny = (controlType == .canny)
+                }
                 let request = ICLoraRequest(
                     prompt: prompt,
-                    sourceControlPath: controlPath,
-                    extractEdges: extractEdges,
+                    sourceControlPath: submitPath,
+                    extractEdges: backendCanny,
                     icLoraId: selectedICLoraId,
                     icLoraStrength: icLoraStrength,
                     controlStrength: controlStrength,
