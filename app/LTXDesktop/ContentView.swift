@@ -4,11 +4,13 @@ struct ContentView: View {
     @EnvironmentObject var processManager: ProcessManager
     @EnvironmentObject var backendService: BackendService
     @StateObject private var queueVM = QueueViewModel()
+    @StateObject private var generationVM = GenerationViewModel()
 
     enum Tab: String, CaseIterable {
         case generation = "Generation"
         case queue = "Queue"
         case history = "History"
+        case controlVideos = "Control Videos"
         case lora = "LoRA"
         case settings = "Settings"
     }
@@ -50,6 +52,8 @@ struct ContentView: View {
                             QueueView()
                         case .history:
                             HistoryView()
+                        case .controlVideos:
+                            ControlLibraryView(onUse: { selectedTab = .generation })
                         case .lora:
                             LoRAView()
                         case .settings:
@@ -77,6 +81,7 @@ struct ContentView: View {
                 queueVM.stopPolling()
             }
         }
+        .environmentObject(generationVM)
     }
 
     private func sidebarButton(_ tab: Tab) -> some View {
@@ -216,6 +221,7 @@ struct ContentView: View {
         case .generation: return "wand.and.sparkles"
         case .queue: return "list.number"
         case .history: return "clock.arrow.circlepath"
+        case .controlVideos: return "square.stack.3d.up"
         case .lora: return "puzzlepiece.extension"
         case .settings: return "gear"
         }
