@@ -38,6 +38,8 @@
 		A100000018 /* RetakeSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000018 /* RetakeSheet.swift */; };
 		A100000019 /* ExtendSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000019 /* ExtendSheet.swift */; };
 		A10000001A /* GenerationPreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000001A /* GenerationPreset.swift */; };
+		A3507D63F214EEA1C8E745FE /* ControlLibraryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B022FD2E66D75C6963A7E45D /* ControlLibraryStore.swift */; };
+		C26915BF1117BDAD98901CBD /* ControlLibraryItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B494FD5C3B778C6F4AA9AC1 /* ControlLibraryItem.swift */; };
 		F528D06DFB5A19B52DEDA7A1 /* PoseRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB2799F16C3811C0A9B062F6 /* PoseRenderer.swift */; };
 /* End PBXBuildFile section */
 
@@ -48,6 +50,7 @@
 		150ADC61E3398DAB809A4539 /* CoreMLModelManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = CoreMLModelManager.swift; path = LTXDesktop/Services/CoreMLModelManager.swift; sourceTree = "<group>"; };
 		2890DBD04F245A9D4774FE30 /* DepthExtractor.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = DepthExtractor.swift; path = LTXDesktop/Services/DepthExtractor.swift; sourceTree = "<group>"; };
 		3DAC688BC7819600CE3677B8 /* ControlVideoProcessor.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ControlVideoProcessor.swift; path = LTXDesktop/Services/ControlVideoProcessor.swift; sourceTree = "<group>"; };
+		7B494FD5C3B778C6F4AA9AC1 /* ControlLibraryItem.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ControlLibraryItem.swift; path = LTXDesktop/Models/ControlLibraryItem.swift; sourceTree = "<group>"; };
 		A200000001 /* LTXDesktopApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LTXDesktopApp.swift; sourceTree = "<group>"; };
 		A200000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		A200000003 /* ProcessManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessManager.swift; sourceTree = "<group>"; };
@@ -74,6 +77,7 @@
 		A200000018 /* RetakeSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RetakeSheet.swift; sourceTree = "<group>"; };
 		A200000019 /* ExtendSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtendSheet.swift; sourceTree = "<group>"; };
 		A20000001A /* GenerationPreset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerationPreset.swift; sourceTree = "<group>"; };
+		B022FD2E66D75C6963A7E45D /* ControlLibraryStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ControlLibraryStore.swift; path = LTXDesktop/Services/ControlLibraryStore.swift; sourceTree = "<group>"; };
 		DB2799F16C3811C0A9B062F6 /* PoseRenderer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = PoseRenderer.swift; path = LTXDesktop/Services/PoseRenderer.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -97,6 +101,8 @@
 				DB2799F16C3811C0A9B062F6 /* PoseRenderer.swift */,
 				150ADC61E3398DAB809A4539 /* CoreMLModelManager.swift */,
 				2890DBD04F245A9D4774FE30 /* DepthExtractor.swift */,
+				7B494FD5C3B778C6F4AA9AC1 /* ControlLibraryItem.swift */,
+				B022FD2E66D75C6963A7E45D /* ControlLibraryStore.swift */,
 			);
 			sourceTree = "<group>";
 		};
@@ -283,6 +289,8 @@
 				F528D06DFB5A19B52DEDA7A1 /* PoseRenderer.swift in Sources */,
 				813ADB5575FD0CA88B67A75E /* CoreMLModelManager.swift in Sources */,
 				549CB28D7CA81B0B6371C5E5 /* DepthExtractor.swift in Sources */,
+				C26915BF1117BDAD98901CBD /* ControlLibraryItem.swift in Sources */,
+				A3507D63F214EEA1C8E745FE /* ControlLibraryStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
