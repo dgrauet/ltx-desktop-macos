@@ -81,10 +81,13 @@ actor ControlLibraryStore {
         guard let track = try await asset.loadTracks(withMediaType: .video).first else { return 0 }
         let reader = try AVAssetReader(asset: asset)
         let out = AVAssetReaderTrackOutput(track: track, outputSettings: nil)
-        reader.add(out); reader.startReading()
-        var n = 0
-        while out.copyNextSampleBuffer() != nil { n += 1 }
-        return n
+        reader.add(out)
+        return try await Task.detached(priority: .userInitiated) {
+            reader.startReading()
+            var n = 0
+            while out.copyNextSampleBuffer() != nil { n += 1 }
+            return n
+        }.value
     }
 
     private static func writeThumbnail(asset: AVAsset, to url: URL) async throws {
@@ -98,12 +101,12 @@ actor ControlLibraryStore {
 }
 
 private extension JSONEncoder {
-    static var iso: JSONEncoder {
+    static let iso: JSONEncoder = {
         let e = JSONEncoder(); e.dateEncodingStrategy = .iso8601; return e
-    }
+    }()
 }
 private extension JSONDecoder {
-    static var iso: JSONDecoder {
+    static let iso: JSONDecoder = {
         let d = JSONDecoder(); d.dateDecodingStrategy = .iso8601; return d
-    }
+    }()
 }
