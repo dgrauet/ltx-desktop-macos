@@ -97,7 +97,9 @@ actor ControlVideoProcessor {
             }
             adaptor.append(outBuffer, withPresentationTime: pts)
             frameIndex += 1
-            if totalFrames > 0 { progress(Double(frameIndex) / Double(totalFrames)) }
+            // totalFrames is an estimate (duration × fps); the real decoded count
+            // can exceed it, so clamp to avoid an out-of-range progress value.
+            if totalFrames > 0 { progress(min(1.0, Double(frameIndex) / Double(totalFrames))) }
         }
 
         writerInput.markAsFinished()

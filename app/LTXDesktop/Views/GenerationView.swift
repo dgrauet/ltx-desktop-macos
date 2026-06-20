@@ -444,7 +444,7 @@ struct GenerationView: View {
                                     .foregroundStyle(.orange)
                             }
                         } else {
-                            ProgressView(value: vm.progress)
+                            ProgressView(value: min(max(vm.progress, 0), 1))
                             HStack(spacing: 0) {
                                 if let status = vm.statusMessage {
                                     Text("\(status) — ")
