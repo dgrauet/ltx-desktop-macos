@@ -123,6 +123,32 @@ def has_audio_stream(video_path: str) -> bool:
         return False
 
 
+def probe_frame_count(video_path: str) -> int:
+    """Count the decoded video frames of a file using ffprobe.
+
+    Args:
+        video_path: Path to the video file.
+
+    Returns:
+        The number of decoded frames, or 0 if it cannot be determined.
+    """
+    try:
+        ffprobe_bin = find_ffprobe()
+        cmd = [
+            ffprobe_bin,
+            "-v", "error",
+            "-count_frames",
+            "-select_streams", "v:0",
+            "-show_entries", "stream=nb_read_frames",
+            "-of", "csv=p=0",
+            video_path,
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        return int(result.stdout.strip()) if result.returncode == 0 else 0
+    except Exception:
+        return 0
+
+
 def extract_edges(
     input_path: str, output_path: str, *, low: float = 0.1, high: float = 0.4,
 ) -> None:

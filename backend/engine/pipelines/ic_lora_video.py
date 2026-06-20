@@ -14,7 +14,7 @@ import uuid
 from collections.abc import Callable
 from pathlib import Path
 
-from engine.ffmpeg_utils import extract_edges
+from engine.ffmpeg_utils import extract_edges, probe_frame_count
 from engine.memory_manager import (
     aggressive_cleanup,
     build_memory_stats_from_subprocess,
@@ -78,6 +78,15 @@ class IcLoraVideoPipeline:
             raise FileNotFoundError(f"Control video not found: {source_control_path}")
         if not ic_lora_path:
             raise ValueError("ic_lora_path is required for IC-LoRA generation")
+        # IC-LoRA's reference VAE encoder needs a (1 + 8k)-frame input and the
+        # library forces a minimum of 9 frames; a shorter control video crashes
+        # deep in the VAE with a cryptic reshape error. Reject it up front.
+        control_frames = probe_frame_count(source_control_path)
+        if control_frames and control_frames < 9:
+            raise ValueError(
+                f"Control video is too short ({control_frames} frames). "
+                "IC-LoRA needs a control video of at least 9 frames."
+            )
 
         job_id = str(uuid.uuid4())[:8]
         stages: dict[str, float] = {}
