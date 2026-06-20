@@ -1,5 +1,4 @@
 import SwiftUI
-import AVKit
 
 /// Reusable grid of saved control videos. `onUse` applies an item; if nil, the
 /// row shows no Use button (view-only context).
@@ -43,6 +42,8 @@ struct ControlLibraryCard: View {
     var onUse: ((ControlLibraryItem) -> Void)?
     var onDelete: () -> Void
 
+    @State private var showDeleteConfirm = false
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             if let img = NSImage(contentsOfFile: item.thumbnailPath) {
@@ -69,10 +70,14 @@ struct ControlLibraryCard: View {
                         .buttonStyle(.borderedProminent).controlSize(.small)
                 }
                 Spacer()
-                Button(role: .destructive) { onDelete() } label: {
+                Button(role: .destructive) { showDeleteConfirm = true } label: {
                     Image(systemName: "trash")
                 }
                 .buttonStyle(.borderless).controlSize(.small)
+                .confirmationDialog("Delete this control video?", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
+                    Button("Delete", role: .destructive) { onDelete() }
+                    Button("Cancel", role: .cancel) {}
+                }
             }
         }
         .padding(8)
