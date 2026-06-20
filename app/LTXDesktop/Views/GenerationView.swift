@@ -284,6 +284,22 @@ struct GenerationView: View {
                 if vm.controlVideoPath != nil {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack {
+                            Text("Control type")
+                                .font(.subheadline)
+                            Spacer()
+                            Picker("", selection: $vm.controlType) {
+                                ForEach(ControlType.allCases) { t in
+                                    Text(t.label).tag(t)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .frame(maxWidth: 220)
+                        }
+                        Text(controlTypeHelp)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        HStack {
                             Text("IC-LoRA")
                                 .font(.subheadline)
                             Spacer()
@@ -969,13 +985,6 @@ struct GenerationView: View {
                         }
                         Spacer()
                     }
-                    Picker("Control type", selection: $vm.controlType) {
-                        ForEach(ControlType.allCases) { type in
-                            Text(type.label).tag(type)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .controlSize(.small)
                 }
                 .padding(8)
                 .background(Color(.controlBackgroundColor).opacity(0.5))
@@ -1053,6 +1062,15 @@ struct GenerationView: View {
                     .font(.subheadline).monospacedDigit().foregroundStyle(.secondary)
             }
             Slider(value: value, in: range, step: 0.05)
+        }
+    }
+
+    private var controlTypeHelp: String {
+        switch vm.controlType {
+        case .raw:   return "Use the video as-is (for transform IC-LoRAs like colorization or deblur)."
+        case .canny: return "Extract edges (canny) on the backend."
+        case .pose:  return "Extract a human-pose skeleton on-device (for Union-Control)."
+        case .depth: return "Extract a depth map on-device (downloads a small model on first use)."
         }
     }
 
