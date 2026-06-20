@@ -4,6 +4,7 @@ struct ContentView: View {
     @EnvironmentObject var processManager: ProcessManager
     @EnvironmentObject var backendService: BackendService
     @StateObject private var queueVM = QueueViewModel()
+    @StateObject private var generationVM = GenerationViewModel()
 
     enum Tab: String, CaseIterable {
         case generation = "Generation"
@@ -77,6 +78,7 @@ struct ContentView: View {
                 queueVM.stopPolling()
             }
         }
+        .environmentObject(generationVM)
     }
 
     private func sidebarButton(_ tab: Tab) -> some View {

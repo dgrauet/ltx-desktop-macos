@@ -28,7 +28,7 @@ struct PlayerView: NSViewRepresentable {
 
 struct GenerationView: View {
     @EnvironmentObject var backendService: BackendService
-    @StateObject private var vm = GenerationViewModel()
+    @EnvironmentObject var vm: GenerationViewModel
     @AppStorage("promptEnhanceEnabled") private var enhanceEnabled: Bool = true
     @State private var player: AVPlayer?
     @State private var showQueuePopover = false
