@@ -196,7 +196,14 @@ class GenerationViewModel: ObservableObject {
                         ) { [weak self] p in
                             Task { @MainActor in self?.progress = p }
                         }
-                        submitPath = processed.path
+                        let sourceName = URL(fileURLWithPath: controlPath).lastPathComponent
+                        if let item = try? await ControlLibraryStore.shared.save(
+                            videoURL: processed, controlType: controlType.rawValue,
+                            sourceName: sourceName) {
+                            submitPath = item.videoPath
+                        } else {
+                            submitPath = processed.path
+                        }
                     } catch {
                         errorMessage = "Control preprocessing failed: \(error.localizedDescription)"
                         isGenerating = false
@@ -398,6 +405,15 @@ class GenerationViewModel: ObservableObject {
 
     func clearControlVideo() {
         controlVideoPath = nil
+    }
+
+    /// Reuse a saved control video. It is already extracted, so treat it as raw
+    /// (no re-extraction): submit the file as-is.
+    func applyLibraryItem(_ item: ControlLibraryItem) {
+        clearSourceImage()
+        sourceAudioPath = nil
+        controlVideoPath = item.videoPath
+        controlType = .raw
     }
 
     // MARK: - Queue Management
