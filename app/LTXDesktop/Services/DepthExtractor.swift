@@ -42,15 +42,19 @@ final class DepthExtractor {
         guard let base = CVPixelBufferGetBaseAddress(depth) else {
             throw ControlProcessingError.writeFailed
         }
-        let isFloat = CVPixelBufferGetPixelFormatType(depth)
-            == kCVPixelFormatType_DepthFloat32 || CVPixelBufferGetPixelFormatType(depth)
-            == kCVPixelFormatType_OneComponent32Float
+        let fmt = CVPixelBufferGetPixelFormatType(depth)
+        let isFloat32 = fmt == kCVPixelFormatType_DepthFloat32
+            || fmt == kCVPixelFormatType_OneComponent32Float
+        let isFloat16 = fmt == kCVPixelFormatType_DepthFloat16
+            || fmt == kCVPixelFormatType_OneComponent16Half
         var values = [Float](repeating: 0, count: dw * dh)
         for y in 0..<dh {
             for x in 0..<dw {
                 let v: Float
-                if isFloat {
+                if isFloat32 {
                     v = base.load(fromByteOffset: y * rowBytes + x * 4, as: Float.self)
+                } else if isFloat16 {
+                    v = Float(base.load(fromByteOffset: y * rowBytes + x * 2, as: Float16.self))
                 } else {
                     v = Float(base.load(fromByteOffset: y * rowBytes + x, as: UInt8.self))
                 }
