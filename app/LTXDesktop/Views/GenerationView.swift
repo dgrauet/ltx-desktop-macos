@@ -36,6 +36,8 @@ struct GenerationView: View {
     @State private var showExtendSheet = false
     @State private var showSavePresetAlert = false
     @State private var newPresetName = ""
+    @State private var showControlLibrary = false
+    @StateObject private var controlLibraryVM = ControlLibraryViewModel()
 
     var body: some View {
         HSplitView {
@@ -979,9 +981,17 @@ struct GenerationView: View {
                             Text(controlPath.components(separatedBy: "/").last ?? "video")
                                 .font(.caption2)
                                 .lineLimit(1)
-                            Button("Clear") { vm.clearControlVideo() }
-                                .buttonStyle(.bordered)
-                                .controlSize(.small)
+                            HStack(spacing: 6) {
+                                Button("Clear") { vm.clearControlVideo() }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
+                                Button {
+                                    showControlLibrary = true
+                                } label: {
+                                    Label("Library", systemImage: "square.stack.3d.up")
+                                }
+                                .buttonStyle(.bordered).controlSize(.small)
+                            }
                         }
                         Spacer()
                     }
@@ -997,9 +1007,15 @@ struct GenerationView: View {
                     Text("Drop or click to add control video (IC-LoRA)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    Button {
+                        showControlLibrary = true
+                    } label: {
+                        Label("Library", systemImage: "square.stack.3d.up")
+                    }
+                    .buttonStyle(.bordered).controlSize(.small)
                 }
                 .frame(maxWidth: .infinity)
-                .frame(height: 70)
+                .frame(height: 90)
                 .background(Color(.controlBackgroundColor).opacity(0.3))
                 .clipShape(RoundedRectangle(cornerRadius: 8))
                 .overlay(
@@ -1013,6 +1029,21 @@ struct GenerationView: View {
                     return true
                 }
             }
+        }
+        .sheet(isPresented: $showControlLibrary) {
+            VStack(spacing: 0) {
+                HStack {
+                    Text("Control Video Library").font(.headline)
+                    Spacer()
+                    Button("Done") { showControlLibrary = false }
+                }
+                .padding()
+                ControlLibraryGrid(vm: controlLibraryVM) { item in
+                    vm.applyLibraryItem(item)
+                    showControlLibrary = false
+                }
+            }
+            .frame(width: 720, height: 520)
         }
     }
 
