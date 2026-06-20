@@ -49,6 +49,7 @@ actor ControlVideoProcessor {
             let model = try await CoreMLModelManager.shared.depthModel(progress: progress)
             depthExtractor = try DepthExtractor(model: model)
         }
+        defer { depthExtractor = nil }
 
         // Reader
         let reader = try AVAssetReader(asset: asset)

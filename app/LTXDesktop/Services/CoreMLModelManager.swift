@@ -11,6 +11,7 @@ actor CoreMLModelManager {
 
     private static let repo = "apple/coreml-depth-anything-v2-small"
     private static let pkg = "DepthAnythingV2SmallF16.mlpackage"
+    private static let revision = "cfef6f6f2a70783dedc0bfae40cecbc2052285d3"
     private static let files = [
         "Manifest.json",
         "Data/com.apple.CoreML/model.mlmodel",
@@ -60,7 +61,7 @@ actor CoreMLModelManager {
         try FileManager.default.createDirectory(at: pkgDir, withIntermediateDirectories: true)
         let total = Double(Self.files.count)
         for (i, rel) in Self.files.enumerated() {
-            let urlStr = "https://huggingface.co/\(Self.repo)/resolve/main/"
+            let urlStr = "https://huggingface.co/\(Self.repo)/resolve/\(Self.revision)/"
                 + Self.pkg + "/" + rel
             guard let url = URL(string: urlStr) else { throw CoreMLModelError.downloadFailed }
             let dest = pkgDir.appendingPathComponent(rel)

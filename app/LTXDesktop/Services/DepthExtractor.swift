@@ -67,9 +67,20 @@ final class DepthExtractor {
         guard shape.count >= 2 else { throw ControlProcessingError.writeFailed }
         let h = shape[shape.count - 2], w = shape[shape.count - 1]
         var values = [Float](repeating: 0, count: w * h)
-        let ptr = arr.dataPointer.bindMemory(to: Float.self, capacity: arr.count)
         let offset = arr.count - w * h
-        for i in 0..<(w * h) { values[i] = ptr[offset + i] }
+        switch arr.dataType {
+        case .float32:
+            let ptr = arr.dataPointer.bindMemory(to: Float.self, capacity: arr.count)
+            for i in 0..<(w * h) { values[i] = ptr[offset + i] }
+        case .float16:
+            let ptr = arr.dataPointer.bindMemory(to: Float16.self, capacity: arr.count)
+            for i in 0..<(w * h) { values[i] = Float(ptr[offset + i]) }
+        case .double:
+            let ptr = arr.dataPointer.bindMemory(to: Double.self, capacity: arr.count)
+            for i in 0..<(w * h) { values[i] = Float(ptr[offset + i]) }
+        @unknown default:
+            throw ControlProcessingError.writeFailed
+        }
         return try gray(values, srcW: w, srcH: h, outW: width, outH: height)
     }
 
@@ -91,8 +102,8 @@ final class DepthExtractor {
         else { throw ControlProcessingError.writeFailed }
         // Resize to output dims.
         guard let ctx = CGContext(data: nil, width: outW, height: outH, bitsPerComponent: 8,
-                                  bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
-                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+                                  bytesPerRow: 0, space: CGColorSpaceCreateDeviceGray(),
+                                  bitmapInfo: CGImageAlphaInfo.none.rawValue)
         else { throw ControlProcessingError.writeFailed }
         ctx.interpolationQuality = .high
         ctx.draw(small, in: CGRect(x: 0, y: 0, width: outW, height: outH))
