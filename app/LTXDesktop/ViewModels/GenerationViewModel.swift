@@ -410,6 +410,11 @@ class GenerationViewModel: ObservableObject {
     /// Reuse a saved control video. It is already extracted, so treat it as raw
     /// (no re-extraction): submit the file as-is.
     func applyLibraryItem(_ item: ControlLibraryItem) {
+        guard FileManager.default.fileExists(atPath: item.videoPath) else {
+            errorMessage = "That control video is no longer available — it may have been deleted."
+            Task { await ControlLibraryStore.shared.delete(id: item.id) }
+            return
+        }
         clearSourceImage()
         sourceAudioPath = nil
         controlVideoPath = item.videoPath
