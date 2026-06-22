@@ -1,0 +1,90 @@
+name: Build macOS DMG
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-mac-dmg:
+    name: Build macOS DMG
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Install ffmpeg
+        run: brew install ffmpeg
+
+      - name: Cache embedded Python environment
+        id: python-cache
+        uses: actions/cache@v4
+        with:
+          path: python-embed
+          key: python-embed-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('backend/uv.lock', 'backend/.python-version') }}
+
+      - name: Prepare embedded Python
+        if: steps.python-cache.outputs.cache-hit != 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/prepare-python.sh
+
+      - name: Generate Python dependency hash
+        run: shasum -a 256 backend/uv.lock | awk '{print $1}' > python-deps-hash.txt
+
+      - name: Build macOS app bundle
+        id: build-app
+        run: |
+          xcodebuild \
+            -project app/LTXDesktop.xcodeproj \
+            -scheme LTXDesktop \
+            -configuration Release \
+            -destination 'platform=macOS,arch=arm64' \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGN_ENTITLEMENTS="$PWD/build/macos/entitlements.plist" \
+            ENABLE_HARDENED_RUNTIME=YES \
+            build
+
+          APP_PATH="build/DerivedData/Build/Products/Release/LTXDesktop.app"
+          if [ ! -d "$APP_PATH" ]; then
+            echo "Error: No .app bundle found at $APP_PATH"
+            exit 1
+          fi
+          echo "app_path=$APP_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Bundle Python backend and ffmpeg
+        run: bash scripts/bundle-app.sh "${{ steps.build-app.outputs.app_path }}"
+
+      - name: Ad-hoc code sign the app bundle
+        run: bash scripts/codesign-macos.sh "${{ steps.build-app.outputs.app_path }}"
+        env:
+          MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY || '-' }}
+
+      - name: Create DMG from signed app
+        run: bash scripts/create-dmg.sh "${{ steps.build-app.outputs.app_path }}"
+
+      - name: Upload DMG to GitHub Release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.event.release.tag_name }}" release/*.dmg --clobber
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg
+          path: release/*.dmg
+          if-no-files-found: error
+          retention-days: 30

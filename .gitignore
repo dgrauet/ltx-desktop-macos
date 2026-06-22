@@ -11,7 +11,11 @@ __pycache__/
 .venv/
 *.egg-info/
 dist/
-build/
+build/DerivedData/
+python-embed/
+python-deps-hash.txt
+backend/requirements-dist.txt
+release/
 
 # Models (large files, downloaded separately)
 models/*.safetensors

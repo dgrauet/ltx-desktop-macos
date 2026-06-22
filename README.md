@@ -27,6 +27,13 @@ A local alternative to [Lightricks LTX Desktop](https://github.com/Lightricks/lt
 
 ## Quick Start
 
+Try LTX Desktop using a pre-compiled [development build](https://github.com/dgrauet/ltx-desktop-macos/releases)
+
+> :warning: On first launch, macOS may show a security warning because the dev build is not notarized by Apple<br>
+> Choose to keep the App and browse to `System Settings > Privacy & Security` and click `Open Anyway`.<br>
+
+## Local Build
+
 ### 1. Install system dependencies
 
 ```bash

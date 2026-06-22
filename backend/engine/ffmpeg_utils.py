@@ -8,6 +8,7 @@ and retake.py.
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -15,46 +16,53 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 
 
-def find_ffmpeg() -> str:
-    """Find the ffmpeg binary on the system.
+def _bundled_bin_dir() -> Path | None:
+    """Return bundled ``Resources/bin`` when running inside a release app."""
+    backend_dir = Path(__file__).resolve().parent.parent
+    bundled = backend_dir.parent / "bin"
+    if (bundled / "ffmpeg").exists() and (bundled / "ffprobe").exists():
+        return bundled
+    return None
 
-    Checks ``shutil.which`` first, then common Homebrew installation paths
-    on Apple Silicon and Intel Macs.
 
-    Returns:
-        Absolute path to the ffmpeg executable.
+def _resolve_tool(name: str, env_var: str, homebrew_candidates: list[str]) -> str:
+    if override := os.environ.get(env_var):
+        if Path(override).exists():
+            return override
 
-    Raises:
-        FileNotFoundError: If ffmpeg cannot be found anywhere.
-    """
-    path = shutil.which("ffmpeg")
+    bundled = _bundled_bin_dir()
+    if bundled is not None:
+        candidate = bundled / name
+        if candidate.exists():
+            return str(candidate)
+
+    path = shutil.which(name)
     if path:
         return path
-    for candidate in ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"]:
+
+    for candidate in homebrew_candidates:
         if Path(candidate).exists():
             return candidate
-    raise FileNotFoundError("ffmpeg not found. Install with: brew install ffmpeg")
+
+    raise FileNotFoundError(f"{name} not found. Install with: brew install ffmpeg")
+
+
+def find_ffmpeg() -> str:
+    """Find the ffmpeg binary on the system or in the app bundle."""
+    return _resolve_tool(
+        "ffmpeg",
+        "LTX_FFMPEG_PATH",
+        ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"],
+    )
 
 
 def find_ffprobe() -> str:
-    """Find the ffprobe binary on the system.
-
-    Checks ``shutil.which`` first, then common Homebrew installation paths
-    on Apple Silicon and Intel Macs.
-
-    Returns:
-        Absolute path to the ffprobe executable.
-
-    Raises:
-        FileNotFoundError: If ffprobe cannot be found anywhere.
-    """
-    path = shutil.which("ffprobe")
-    if path:
-        return path
-    for candidate in ["/opt/homebrew/bin/ffprobe", "/usr/local/bin/ffprobe"]:
-        if Path(candidate).exists():
-            return candidate
-    raise FileNotFoundError("ffprobe not found. Install with: brew install ffmpeg")
+    """Find the ffprobe binary on the system or in the app bundle."""
+    return _resolve_tool(
+        "ffprobe",
+        "LTX_FFPROBE_PATH",
+        ["/opt/homebrew/bin/ffprobe", "/usr/local/bin/ffprobe"],
+    )
 
 
 def probe_video_info(video_path: str) -> tuple[int, int, float]:

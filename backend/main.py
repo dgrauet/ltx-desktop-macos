@@ -1560,13 +1560,15 @@ async def import_lora(req: ImportLoRARequest):
 @app.post("/api/v1/export/video", response_model=PathResponse)
 async def export_video(req: ExportVideoRequest):
     """Re-encode a video with the specified codec and format."""
-    import shutil
     import subprocess
     from pathlib import Path
 
-    ffmpeg_bin = shutil.which("ffmpeg") or "/opt/homebrew/bin/ffmpeg"
-    if not Path(ffmpeg_bin).exists():
-        raise HTTPException(status_code=503, detail="ffmpeg not found")
+    from engine.ffmpeg_utils import find_ffmpeg
+
+    try:
+        ffmpeg_bin = find_ffmpeg()
+    except FileNotFoundError:
+        raise HTTPException(status_code=503, detail="ffmpeg not found") from None
 
     output_dir = Path.home() / ".ltx-desktop" / "exports"
     output_dir.mkdir(parents=True, exist_ok=True)
