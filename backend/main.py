@@ -17,9 +17,10 @@ import uuid
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
+import dataset_store
 import history_store
 import preset_manager
 from engine.lora_manager import LoRAManager
@@ -1553,6 +1554,113 @@ async def import_lora(req: ImportLoRARequest):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+
+# --- Training dataset endpoints ---
+
+
+class CreateDatasetRequest(BaseModel):
+    """Request to create a new training dataset."""
+    dataset_id: str = Field(..., min_length=1)
+
+
+class ManifestEntryRequest(BaseModel):
+    """A single manifest entry with caption and video path."""
+    caption: str
+    video: str
+
+
+class PutManifestRequest(BaseModel):
+    """Request body for PUT manifest."""
+    entries: list[ManifestEntryRequest]
+
+
+@app.post("/api/v1/training/datasets")
+async def create_training_dataset(req: CreateDatasetRequest):
+    """Create a new training dataset directory with clips/ and captions/ subdirs.
+
+    Args:
+        req: Request body containing the dataset_id.
+
+    Returns:
+        JSON with dataset_id of the created dataset.
+    """
+    dataset_store.create_dataset(req.dataset_id)
+    return {"dataset_id": req.dataset_id}
+
+
+@app.get("/api/v1/training/datasets")
+async def list_training_datasets():
+    """List all training datasets with clip count, disk usage, and precomputed flag.
+
+    Returns:
+        List of dataset metadata dicts.
+    """
+    return dataset_store.list_datasets()
+
+
+@app.post("/api/v1/training/datasets/{dataset_id}/clips")
+async def upload_training_clip(dataset_id: str, file: UploadFile = File(...)):
+    """Upload a video clip to a dataset's clips/ directory.
+
+    Args:
+        dataset_id: Target dataset identifier.
+        file: Multipart video file upload.
+
+    Returns:
+        JSON with filename of the saved clip.
+    """
+    clips = dataset_store.clips_dir(dataset_id)
+    clips.mkdir(parents=True, exist_ok=True)
+    dest = clips / file.filename
+    dest.write_bytes(await file.read())
+    return {"filename": file.filename}
+
+
+@app.put("/api/v1/training/datasets/{dataset_id}/manifest")
+async def put_training_manifest(dataset_id: str, req: PutManifestRequest):
+    """Validate and write the manifest for a training dataset.
+
+    Builds the manifest (raises 400 on empty captions), runs per-clip media
+    validation, computes adequacy warnings, writes manifest.json, and returns
+    any violations and warnings.
+
+    Args:
+        dataset_id: Target dataset identifier.
+        req: Manifest entries with caption and video fields.
+
+    Returns:
+        JSON with ok, warnings list, and violations dict keyed by video path.
+    """
+    entries = [{"caption": e.caption, "video": e.video} for e in req.entries]
+    try:
+        manifest = dataset_store.build_manifest(entries)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    violations: dict[str, list[str]] = {}
+    for entry in manifest:
+        clip_violations = dataset_store.validate_clip(entry["video"])
+        if clip_violations:
+            violations[entry["video"]] = clip_violations
+
+    warnings = dataset_store.adequacy_warnings(manifest)
+    dataset_store.write_manifest(str(dataset_store.dataset_dir(dataset_id)), manifest)
+
+    return {"ok": True, "warnings": warnings, "violations": violations}
+
+
+@app.delete("/api/v1/training/datasets/{dataset_id}")
+async def delete_training_dataset(dataset_id: str):
+    """Delete a training dataset and all its contents.
+
+    Args:
+        dataset_id: Dataset to delete.
+
+    Returns:
+        JSON with deleted bool (True if deleted, False if not found).
+    """
+    deleted = dataset_store.delete_dataset(dataset_id)
+    return {"deleted": deleted}
 
 
 # --- Export endpoints ---
