@@ -80,6 +80,20 @@ def main() -> int:  # noqa: PLR0911  (multiple return paths are intentional)
         help="LoRA rank. Default: 32.",
     )
     ap.add_argument(
+        "--learning-rate",
+        type=float,
+        default=5e-4,
+        metavar="LR",
+        help="AdamW learning rate. Default: 5e-4.",
+    )
+    ap.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        metavar="N",
+        help="Global RNG seed. Default: 42.",
+    )
+    ap.add_argument(
         "--preflight",
         type=int,
         default=0,
@@ -114,6 +128,8 @@ def main() -> int:  # noqa: PLR0911  (multiple return paths are intentional)
         output_dir=args.output,
         steps=steps,
         rank=args.rank,
+        learning_rate=args.learning_rate,
+        seed=args.seed,
         video_dims=(704, 480, 25),
         low_ram=args.low_ram,
     )

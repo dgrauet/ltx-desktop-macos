@@ -264,17 +264,39 @@ def test_manifest_rejects_traversal_video(monkeypatch, tmp_path):
     assert r.status_code == 400
 
 
-def test_generation_blocked_when_training_lock_held():
-    """POST /generate/text-to-video returns 409 while training lock is held."""
+import pytest
+
+# (endpoint, minimal valid body) for each generation route guarded by the
+# training lock. Bodies satisfy each request model's required/min fields.
+_GEN_ENDPOINTS = [
+    ("/api/v1/generate/text-to-video",
+     {"prompt": "a cat", "width": 256, "height": 256, "num_frames": 9}),
+    ("/api/v1/generate/image-to-video",
+     {"prompt": "a cat", "source_image_path": "/tmp/x.png",
+      "width": 256, "height": 256, "num_frames": 9}),
+    ("/api/v1/generate/audio-to-video",
+     {"prompt": "a cat", "source_audio_path": "/tmp/x.wav",
+      "width": 256, "height": 256, "num_frames": 9}),
+    ("/api/v1/generate/ic-lora",
+     {"prompt": "a cat", "source_control_path": "/tmp/x.mp4",
+      "width": 256, "height": 256, "num_frames": 9}),
+    ("/api/v1/generate/retake",
+     {"source_video_path": "/tmp/x.mp4", "prompt": "a cat",
+      "start_time_s": 0.0, "end_time_s": 1.0}),
+    ("/api/v1/generate/extend",
+     {"source_video_path": "/tmp/x.mp4", "prompt": "a cat"}),
+]
+
+
+@pytest.mark.parametrize("endpoint,body", _GEN_ENDPOINTS)
+def test_generation_blocked_when_training_lock_held(endpoint, body):
+    """Every generation endpoint returns 409 while the training lock is held."""
     from training_lock import training_lock as _tl
     acquired = _tl.try_acquire("training")
     assert acquired, "Could not acquire training lock for test"
     try:
-        r = client.post(
-            "/api/v1/generate/text-to-video",
-            json={"prompt": "a cat", "width": 256, "height": 256, "num_frames": 9},
-        )
-        assert r.status_code == 409
+        r = client.post(endpoint, json=body)
+        assert r.status_code == 409, f"{endpoint} did not return 409 while lock held"
     finally:
         _tl.release("training")
 
@@ -282,11 +304,34 @@ def test_generation_blocked_when_training_lock_held():
 def test_generation_not_blocked_when_training_lock_released():
     """After releasing the training lock, the guard no longer blocks (status != 409)."""
     from training_lock import training_lock as _tl
-    # Make sure lock is free
+    # Ensure the lock is fully released before exercising the guard.
     _tl.release("training")
+    assert not _tl.is_held(), "Training lock still held — cannot test released path"
     r = client.post(
         "/api/v1/generate/text-to-video",
         json={"prompt": "a cat", "width": 256, "height": 256, "num_frames": 9},
     )
     # Accept any status except 409 — we're only testing the guard, not the full pipeline
     assert r.status_code != 409
+
+
+def test_cancel_marks_run_cancelled(monkeypatch, tmp_path):
+    """Cancelling a run with no live supervisor transitions status to 'cancelled'."""
+    import training_store
+    monkeypatch.setattr(training_store, "TRAINING_DIR", tmp_path / "training")
+    monkeypatch.setattr(training_store, "RUNS_DIR", tmp_path / "training" / "runs")
+
+    run_id = "cancel-run-1"
+    training_store.create_run(
+        run_id, dataset_id="ds", config_path="x", created_at="2026-06-23T00:00:00Z"
+    )
+    training_store.update_run(run_id, status="training")
+
+    # No entry in _active_training → cancel sets status directly.
+    r = client.post(f"/api/v1/training/runs/{run_id}/cancel")
+    assert r.status_code == 200
+    assert r.json()["success"] is True
+
+    got = client.get(f"/api/v1/training/runs/{run_id}")
+    assert got.status_code == 200
+    assert got.json()["status"] == "cancelled"

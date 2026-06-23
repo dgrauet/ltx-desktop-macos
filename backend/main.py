@@ -65,6 +65,12 @@ ws_connections: dict[str, list[WebSocket]] = {}
 # Priority job queue — one GPU job at a time
 job_queue = JobQueue()
 
+# Active training runs: run_id -> (supervisor asyncio.Task, current subprocess|None).
+# Used by the cancel endpoint to terminate the live subprocess and cancel the
+# supervisor task (status-only cancellation is insufficient — the subprocess
+# would keep running and hold the training lock).
+_active_training: dict[str, tuple[Any, Any]] = {}
+
 
 # --- Lifespan ---
 
@@ -1874,8 +1880,16 @@ async def _training_supervisor(
     low_ram: bool,
     rank: int,
     steps: int,
+    learning_rate: float | None = None,
+    seed: int | None = None,
 ) -> None:
-    """Background task: preprocess → train → import LoRA."""
+    """Background task: preprocess → train → import LoRA.
+
+    Registers each live subprocess in ``_active_training`` so the cancel
+    endpoint can terminate it. On cancellation (the supervisor task is
+    cancelled), marks the run cancelled and re-raises so ``finally`` still
+    releases the lock and de-registers the run.
+    """
     from training_lock import training_lock as _tl
     from engine.training import protocol as _proto
 
@@ -1889,6 +1903,10 @@ async def _training_supervisor(
     data_root = str(dataset_store.dataset_dir(dataset_id))
     precomputed = dataset_store.precomputed_dir(dataset_id)
     output_dir = str(training_store.run_dir(run_id))
+    task = asyncio.current_task()
+    # Register before any subprocess so a cancel arriving during preprocess
+    # still finds the run and can cancel the task.
+    _active_training[run_id] = (task, None)
 
     try:
         # Materialize captions
@@ -1911,15 +1929,24 @@ async def _training_supervisor(
                 stdout=asyncio.subprocess.DEVNULL,
                 cwd=str(backend_dir),
             )
+            _active_training[run_id] = (task, proc)
             assert proc.stderr is not None
+            pp_tail: list[str] = []
             async for raw_line in proc.stderr:
                 line = raw_line.decode(errors="replace").rstrip()
+                pp_tail.append(line)
+                if len(pp_tail) > 40:
+                    pp_tail.pop(0)
                 evt = _proto.parse_line(line)
                 if evt:
                     await _broadcast_training(job_id, evt)
             await proc.wait()
             if proc.returncode != 0:
-                training_store.update_run(run_id, status="failed", error="Preprocessing failed")
+                pp_text = "\n".join(pp_tail)
+                training_store.update_run(
+                    run_id, status="failed",
+                    error=pp_text[-500:] if pp_text else "preprocess_runner exited non-zero",
+                )
                 await _broadcast_training(job_id, {"type": "error", "message": "Preprocessing failed"})
                 return
 
@@ -1936,6 +1963,10 @@ async def _training_supervisor(
             "--steps", str(steps),
             "--rank", str(rank),
         ]
+        if learning_rate is not None:
+            train_cmd += ["--learning-rate", str(learning_rate)]
+        if seed is not None:
+            train_cmd += ["--seed", str(seed)]
         if low_ram:
             train_cmd.append("--low-ram")
 
@@ -1950,6 +1981,7 @@ async def _training_supervisor(
                 stdout=asyncio.subprocess.DEVNULL,
                 cwd=str(backend_dir),
             )
+            _active_training[run_id] = (task, proc)
             assert proc.stderr is not None
             async for raw_line in proc.stderr:
                 line = raw_line.decode(errors="replace").rstrip()
@@ -1991,11 +2023,20 @@ async def _training_supervisor(
             training_store.update_run(run_id, status="completed")
             await _broadcast_training(job_id, {"type": "done", "lora_path": None})
 
+    except asyncio.CancelledError:
+        log.info("Run %s: cancelled", run_id)
+        training_store.update_run(run_id, status="cancelled")
+        try:
+            await _broadcast_training(job_id, {"type": "status", "status": "cancelled"})
+        except Exception:
+            pass
+        raise
     except Exception as exc:
         log.error("Run %s: supervisor error: %s", run_id, exc)
         training_store.update_run(run_id, status="failed", error=str(exc))
         await _broadcast_training(job_id, {"type": "error", "message": str(exc)})
     finally:
+        _active_training.pop(run_id, None)
         _tl.release("training")
 
 
@@ -2039,13 +2080,24 @@ async def training_preflight(req: TrainingPreflightRequest):
             ]
             proc = await asyncio.create_subprocess_exec(
                 *preprocess_cmd,
-                stderr=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.DEVNULL,
                 cwd=str(backend_dir),
             )
+            assert proc.stderr is not None
+            pp_tail: list[str] = []
+            async for raw_line in proc.stderr:
+                line = raw_line.decode(errors="replace").rstrip()
+                pp_tail.append(line)
+                if len(pp_tail) > 40:
+                    pp_tail.pop(0)
             await proc.wait()
             if proc.returncode != 0:
-                raise HTTPException(status_code=500, detail="Preprocessing failed during preflight")
+                pp_text = "\n".join(pp_tail)
+                detail = "Preprocessing failed during preflight"
+                if pp_text:
+                    detail = f"{detail}: {pp_text[-200:]}"
+                raise HTTPException(status_code=500, detail=detail)
 
         import tempfile
         with tempfile.TemporaryDirectory() as tmp_out:
@@ -2125,6 +2177,8 @@ async def create_training_run(req: TrainingRunRequest):
             low_ram=req.low_ram,
             rank=req.rank,
             steps=req.steps,
+            learning_rate=req.learning_rate,
+            seed=req.seed,
         )
     )
 
@@ -2133,7 +2187,12 @@ async def create_training_run(req: TrainingRunRequest):
 
 @app.post("/api/v1/training/runs/{run_id}/cancel")
 async def cancel_training_run(run_id: str):
-    """Mark a pending/preprocessing/training run as cancelled.
+    """Cancel a running or pending training run.
+
+    Terminates the live subprocess (if any) and cancels the supervisor task so
+    the training lock is released and generation is unblocked. The supervisor's
+    ``CancelledError`` handler writes status="cancelled"; if the run was not
+    active (e.g. lock was never acquired) we set it here directly.
 
     Args:
         run_id: ID of the training run to cancel.
@@ -2146,6 +2205,21 @@ async def cancel_training_run(run_id: str):
         raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
     if run.get("status") in ("completed", "failed", "cancelled"):
         return {"success": False, "message": f"Run is already {run['status']}"}
+
+    entry = _active_training.pop(run_id, None)
+    if entry is not None:
+        task, proc = entry
+        if proc is not None and proc.returncode is None:
+            try:
+                proc.terminate()
+            except ProcessLookupError:
+                pass
+        if task is not None:
+            task.cancel()
+        # The supervisor's CancelledError handler writes status="cancelled".
+        return {"success": True}
+
+    # No live supervisor (pending or already-finished-but-not-marked) — set directly.
     training_store.update_run(run_id, status="cancelled")
     return {"success": True}
 
