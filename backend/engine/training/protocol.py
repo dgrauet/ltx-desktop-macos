@@ -31,6 +31,8 @@ def parse_line(line: str) -> dict | None:
         return {"type": "sample", "path": line[len("SAMPLE:"):]}
     if line.startswith("DONE:"):
         return {"type": "done", "lora_path": line[len("DONE:"):]}
+    if line.startswith("STATUS:"):
+        return {"type": "status", "status": line[len("STATUS:"):]}
     if line.startswith("ERROR:"):
         return {"type": "error", "message": line[len("ERROR:"):]}
     return None

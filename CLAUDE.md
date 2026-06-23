@@ -74,9 +74,9 @@ FastAPI in separate process for: crash isolation (OOM kills backend, not UI), GI
 - ✅ **Training tab** — 3-panel UI: Dataset Builder (drag clips, add captions, save manifest), Training Config (rank, steps, low-RAM toggle, preflight), Progress (live step counter + log stream via WebSocket).
 - ✅ **Dataset CRUD + preprocess** — backend stores manifests in `~/.ltx-desktop/datasets/`; preprocess runner calls `ltx_trainer_mlx.preprocess.preprocess_dataset()` and caches `.precomputed/` alongside the videos dir.
 - ✅ **Preflight check** — validates frame counts, resolution divisibility (frames%8==1), caption completeness, disk space; returns a structured verdict before starting a run.
-- ✅ **Training supervisor** — wraps `LtxvTrainer(LtxTrainerConfig).train(step_callback=...)` in a supervised subprocess; streams `TrainingEvent` progress over `/ws/training/{run_id}`; retries once on macOS GPU "Impacting Interactivity" watchdog kill (SIGKILL/SIGABRT during sustained Metal use).
+- ✅ **Training supervisor** — wraps `LtxvTrainer(LtxTrainerConfig).train(step_callback=...)` in a supervised subprocess; streams `TrainingEvent` progress over `/ws/progress/{job_id}`; retries once on macOS GPU "Impacting Interactivity" watchdog kill (SIGKILL/SIGABRT during sustained Metal use).
 - ✅ **Default = normal training** (full bf16 base, no forced batch/grad constraints). **Low-RAM mode is opt-in** (`low_ram=True` in UI toggle): uses q4 quantized base + batch 1 + gradient checkpointing + reduced validation — the right choice on 32GB machines.
-- ✅ **Generation ↔ training exclusion lock** — a single `asyncio.Lock` prevents concurrent GPU use: `/api/v1/generate/*` returns 409 while a training run is active, and vice versa.
+- ✅ **Generation ↔ training exclusion lock** — a `threading.Lock`-guarded `ExclusionLock` (named holder) prevents concurrent GPU use: `/api/v1/generate/*` returns 409 while a training run is active, and vice versa.
 - ✅ **LoRA auto-import** — on run completion the produced `lora_weights_step_NNNNN.safetensors` is imported into `LoRAManager` and appears immediately in the Generation LoRA picker.
 - ✅ **Per-step loss display is a 0.0 placeholder** — `StepCallback = Callable[[int,int,list[Path]], None]` provides step index and sample paths but no loss value. A real loss curve requires an upstream `ltx-2-mlx` step-loss callback (tracked as P2 lib dep).
 - ✅ **Dependency bumped to ltx-2-mlx 0.14.13** (commit 89dd935 fixes fps→frame_rate ×3, decoder()→.decode(), bf16→f32 PEP3118 bugs found during P0 spike).
@@ -138,11 +138,10 @@ POST /api/v1/generate/ic-lora
 ```
 GET  /api/v1/training/datasets           POST /api/v1/training/datasets
 GET  /api/v1/training/datasets/{id}      DELETE /api/v1/training/datasets/{id}
-POST /api/v1/training/datasets/{id}/preprocess
 POST /api/v1/training/preflight          POST /api/v1/training/runs
 GET  /api/v1/training/runs               GET  /api/v1/training/runs/{run_id}
 DELETE /api/v1/training/runs/{run_id}    POST /api/v1/training/runs/{run_id}/cancel
-WS   /ws/training/{run_id}
+WS   /ws/progress/{job_id}
 ```
 
 ### Untested (code exists, no end-to-end verification with real LoRAs)
@@ -277,6 +276,6 @@ Example:
 6. **LTX-2.0 LoRAs incompatible with 2.3** — different latent space, must retrain
 7. **DiT has global temporal attention** — cannot window diffusion loop or use LLM-style KV-caching
 8. **1920×1080 untested on 32GB** — max verified resolution is 1280×704
-9. **Generation ↔ training are mutually exclusive** — both paths acquire the same `asyncio.Lock`; concurrent attempts return 409. Never bypass this lock.
+9. **Generation ↔ training are mutually exclusive** — both paths acquire the `threading.Lock`-guarded `ExclusionLock`; concurrent attempts return 409. Never bypass this lock.
 10. **macOS GPU watchdog** — sustained Metal work (training steps, full generation) can be SIGKILL'd when another GPU/display app is active. The training supervisor retries once. Advise users to close Xcode-debugged apps, games, and screen-recording tools before training.
 11. **`mx.get_peak_memory()` is unreliable during training** — reports ~6–7× the actual RSS on 32GB (MLX accounting artifact). Do not surface it as "RAM needed"; use process RSS or system available memory instead.

@@ -30,3 +30,7 @@ def test_preflight_verdict_thresholds():
 def test_step_malformed_returns_none():
     """parse_line("STEP:abc") must return None, not raise."""
     assert parse_line("STEP:abc") is None
+
+
+def test_status_line():
+    assert parse_line("STATUS:Loading model") == {"type": "status", "status": "Loading model"}

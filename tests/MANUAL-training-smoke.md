@@ -39,12 +39,11 @@ Timings are unmeasured; a real training run can take a while depending on step c
 
 ## Step 3 — Preprocess the dataset
 
-- [ ] With the dataset selected, click **Preprocess**.
-  - Expected: a progress indicator appears; the backend calls `preprocess_dataset()` against the clips directory.
+- [ ] Preprocessing runs automatically on the first preflight or training run — there is no separate "Preprocess" button.
+  - The backend calls `preprocess_dataset()` against the clips directory during preflight/training startup.
   - Preprocess encodes each clip through the Gemma text encoder and VAE, saving results to `.precomputed/` alongside the videos dir.
-- [ ] Wait for completion.
-  - Expected: the Dataset Builder shows a "Preprocessed" badge or similar confirmation.
-  - Verify: `~/.ltx-desktop/datasets/<dataset-id>/.precomputed/` is populated (2 files per clip: video latents + text embeddings = 12 files for 6 clips).
+- [ ] After running preflight (Step 4), verify:
+  - `~/.ltx-desktop/datasets/<dataset-id>/.precomputed/` is populated (2 files per clip: video latents + text embeddings = 12 files for 6 clips).
 
 ---
 
@@ -69,7 +68,7 @@ Timings are unmeasured; a real training run can take a while depending on step c
   - Low-RAM mode uses: q4 quantized base + batch size 1 + gradient checkpointing + reduced validation.
   - Default (Low-RAM OFF): full bf16 base, standard batch/grad settings — appropriate for larger machines.
 - [ ] Click **Start Training**.
-  - Expected: the Progress panel activates; a WebSocket connection opens to `/ws/training/{run_id}`; step counter advances.
+  - Expected: the Progress panel activates; a WebSocket connection opens to `/ws/progress/{job_id}`; step counter advances.
 - [ ] While training runs, attempt to start a generation from the Generate tab.
   - Expected: the backend returns **409 Conflict** and the UI shows a "Training in progress" error — the generation ↔ training exclusion lock is working.
 - [ ] If a macOS GPU watchdog kill occurs (supervisor logs "Impacting Interactivity"):

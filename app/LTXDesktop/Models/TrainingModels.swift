@@ -72,18 +72,18 @@ struct PreflightResult: Codable {
 
 // MARK: - Training WebSocket Events
 
-/// Decoded from the training WebSocket stream.
+/// Decoded from the training WebSocket stream at `/ws/progress/{job_id}`.
 /// Backend sends JSON dicts with a `type` discriminator.
 /// - status:  {"type":"status","status":"<string>"}
 /// - step:    {"type":"step","step":<int>,"loss":<float>,"lr":<float>,"peak_mem_gb":<float>}
 /// - sample:  {"type":"sample","path":"<string>"}
-/// - done:    {"type":"done","lora_path":"<string>"}
+/// - done:    {"type":"done","lora_path":"<string>|null"}
 /// - error:   {"type":"error","message":"<string>"}
 enum TrainingEvent: Decodable {
     case status(String)
     case step(step: Int, total: Int, peakMemGb: Double)
     case sample(String)
-    case done(loraPath: String)
+    case done(loraPath: String?)
     case error(String)
 
     private enum CodingKeys: String, CodingKey {
@@ -113,7 +113,7 @@ enum TrainingEvent: Decodable {
             let path = try container.decode(String.self, forKey: .path)
             self = .sample(path)
         case "done":
-            let loraPath = try container.decode(String.self, forKey: .loraPath)
+            let loraPath = try container.decodeIfPresent(String.self, forKey: .loraPath)
             self = .done(loraPath: loraPath)
         case "error":
             let message = try container.decode(String.self, forKey: .message)
