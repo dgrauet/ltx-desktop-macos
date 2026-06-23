@@ -131,7 +131,7 @@ struct DatasetBuilderView: View {
                 .font(.callout)
             }
         }
-        .onDrop(of: [.fileURL, .movie], isTargeted: $isDropTargeted) { providers in
+        .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in
             handleDrop(providers: providers)
         }
         .disabled(vm.selectedDatasetId == nil)
@@ -303,6 +303,7 @@ struct DatasetBuilderView: View {
     }
 
     private func handleDrop(providers: [NSItemProvider]) -> Bool {
+        let lock = DispatchQueue(label: "datasetbuilder.drop")
         var urls: [URL] = []
         let group = DispatchGroup()
 
@@ -315,7 +316,7 @@ struct DatasetBuilderView: View {
                        let url = URL(dataRepresentation: data, relativeTo: nil) {
                         let ext = url.pathExtension.lowercased()
                         if ["mp4", "mov", "m4v", "avi", "mkv"].contains(ext) {
-                            urls.append(url)
+                            lock.sync { urls.append(url) }
                         }
                     }
                 }
