@@ -1,6 +1,7 @@
 """Subprocess: preprocess a training dataset into cached latents/embeddings.
 
-Emits STATUS: lines on stderr (mlx_runner convention). stdout is reserved.
+Progress AND result events go to stderr via the protocol (STATUS:/ERROR: lines,
+mlx_runner convention). stdout is left unused.
 
 Usage::
 
@@ -88,19 +89,25 @@ def main() -> int:
 
     _progress("STATUS:Preprocessing dataset")
 
-    # Heavy import stays inside main() so --help exits fast.
+    # Heavy imports stay inside main() so --help exits fast.
     from ltx_trainer_mlx.preprocess import preprocess_dataset  # noqa: PLC0415
+
+    from engine.training import protocol  # noqa: PLC0415
 
     gemma_model_id = args.text_encoder or "mlx-community/gemma-3-12b-it-4bit"
 
-    preprocess_dataset(
-        videos_dir=args.manifest,
-        output_dir=args.out,
-        model_dir=args.model,
-        gemma_model_id=gemma_model_id,
-        captions_dir=args.captions_dir,
-        max_frames=args.max_frames,
-    )
+    try:
+        preprocess_dataset(
+            videos_dir=args.manifest,
+            output_dir=args.out,
+            model_dir=args.model,
+            gemma_model_id=gemma_model_id,
+            captions_dir=args.captions_dir,
+            max_frames=args.max_frames,
+        )
+    except Exception as exc:  # noqa: BLE001 — surface errors to parent
+        _progress(protocol.format_error(f"{type(exc).__name__}: {exc}"))
+        return 1
 
     _progress("STATUS:Done")
     return 0

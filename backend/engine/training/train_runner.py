@@ -1,4 +1,8 @@
-"""Subprocess: train a T2V LoRA via LtxvTrainer; stderr progress; stdout reserved.
+"""Subprocess: train a T2V LoRA via LtxvTrainer.
+
+Progress AND result events go to stderr via the protocol (including DONE:, which
+is a protocol event parsed by ``protocol.parse_line`` — NOT a stdout result).
+stdout is left unused.
 
 Emits protocol lines on stderr:
   STATUS:<msg>          — human-readable phase label
