@@ -41,3 +41,25 @@ def test_few_clips_warns_not_raises():
     assert m[0]["caption"] == "a cat"
     # adequacy warning surfaced separately, not an exception
     assert MIN_CLIPS == 5
+
+
+def test_missing_clip_flagged():
+    violations = validate_clip("/tmp/does_not_exist_xyz.mp4")
+    assert violations, "expected at least one violation for missing file"
+    assert any("not found" in v for v in violations), f"unexpected message: {violations}"
+
+
+def test_zero_frame_message_wording(tmp_path):
+    """Zero-frame branch produces the corrupt-file message, not a frame-count mismatch."""
+    from unittest.mock import patch
+
+    real_clip = tmp_path / "real.mp4"
+    _make_clip(real_clip, frames=25, w=704, h=480)
+
+    with patch("dataset_store.probe_frame_count", return_value=0):
+        violations = validate_clip(str(real_clip))
+
+    assert violations, "expected violation for 0-frame probe result"
+    assert any("corrupt" in v or "could not read" in v for v in violations), (
+        f"expected corrupt/unreadable message, got: {violations}"
+    )

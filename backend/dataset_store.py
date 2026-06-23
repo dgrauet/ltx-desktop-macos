@@ -10,9 +10,14 @@ MIN_CLIPS = 5
 
 
 def validate_clip(path: str) -> list[str]:
+    if not Path(path).exists():
+        return [f"{path}: file not found"]
     violations: list[str] = []
     w, h, _fps = probe_video_info(path)
     frames = probe_frame_count(path)
+    if frames == 0:
+        violations.append("could not read video (0 frames) — file may be corrupt")
+        return violations
     if w % 32 != 0:
         violations.append(f"width {w} not divisible by 32")
     if h % 32 != 0:
