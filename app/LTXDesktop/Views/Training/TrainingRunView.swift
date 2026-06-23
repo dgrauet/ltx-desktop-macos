@@ -209,7 +209,7 @@ private struct RunRowView: View {
         case "done": return "checkmark.circle.fill"
         case "error", "failed": return "exclamationmark.circle.fill"
         case "cancelled": return "minus.circle.fill"
-        case "running": return "arrow.trianglehead.2.clockwise.rotate.90.circle"
+        case "running": return "arrow.2.circlepath.circle"
         default: return "circle"
         }
     }
