@@ -159,7 +159,8 @@ def test_put_manifest_writes_file(monkeypatch, tmp_path):
     clip.write_bytes(b"\x00")  # file exists; validate_clip will probe it
     r = client.put(
         "/api/v1/training/datasets/write-ds/manifest",
-        json={"entries": [{"caption": "a cat walks", "video": str(clip)}]},
+        # The manifest video field must be a bare basename — no path components.
+        json={"entries": [{"caption": "a cat walks", "video": "vid.mp4"}]},
     )
     assert r.status_code == 200
     # Manifest file written regardless of media violations
@@ -229,3 +230,35 @@ def test_dataset_id_traversal_rejected(monkeypatch, tmp_path):
     # so send it URL-encoded so it reaches (and is rejected by) the handler.
     r_delete = client.delete("/api/v1/training/datasets/%2e%2e")
     assert r_delete.status_code == 400
+
+
+def test_create_dataset_rejects_traversal_id(monkeypatch, tmp_path):
+    """POST /training/datasets with a traversal dataset_id must return HTTP 400."""
+    _patch_training_dir(monkeypatch, tmp_path)
+    r = client.post("/api/v1/training/datasets", json={"dataset_id": "../escape"})
+    assert r.status_code == 400
+    # A valid id still works.
+    r_ok = client.post("/api/v1/training/datasets", json={"dataset_id": "d1"})
+    assert r_ok.status_code == 200
+    assert r_ok.json()["dataset_id"] == "d1"
+
+
+def test_delete_dataset_rejects_traversal_id(monkeypatch, tmp_path):
+    """DELETE /training/datasets/<traversal> must return HTTP 400."""
+    _patch_training_dir(monkeypatch, tmp_path)
+    # URL-encoded ".." so it survives routing and is rejected by _safe_dataset_id.
+    r = client.delete("/api/v1/training/datasets/%2e%2e")
+    assert r.status_code == 400
+    # Confirm no directory was created outside tmp_path.
+    assert not (tmp_path.parent / "escape").exists()
+
+
+def test_manifest_rejects_traversal_video(monkeypatch, tmp_path):
+    """PUT manifest with a traversal video path must return HTTP 400."""
+    _patch_training_dir(monkeypatch, tmp_path)
+    client.post("/api/v1/training/datasets", json={"dataset_id": "manif-trav"})
+    r = client.put(
+        "/api/v1/training/datasets/manif-trav/manifest",
+        json={"entries": [{"caption": "a cat", "video": "../../etc/passwd"}]},
+    )
+    assert r.status_code == 400

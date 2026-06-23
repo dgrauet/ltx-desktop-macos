@@ -91,6 +91,10 @@ def delete_dataset(dataset_id: str) -> bool:
     root = dataset_dir(dataset_id)
     if not root.exists():
         return False
+    # Defense-in-depth: confirm root is a direct child of TRAINING_DIR even if
+    # a caller somehow bypasses endpoint-level validation.
+    if root.resolve().parent != TRAINING_DIR.resolve():
+        return False
     shutil.rmtree(root)
     return True
 
