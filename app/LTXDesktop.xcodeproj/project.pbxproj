@@ -43,6 +43,7 @@
 		A100000019 /* ExtendSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000019 /* ExtendSheet.swift */; };
 		A10000001A /* GenerationPreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000001A /* GenerationPreset.swift */; };
 		A3507D63F214EEA1C8E745FE /* ControlLibraryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B022FD2E66D75C6963A7E45D /* ControlLibraryStore.swift */; };
+		C220D8C19E34C90E2EBD8320 /* DatasetBuilderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48E487A9A1D97B3E21F34847 /* DatasetBuilderView.swift */; };
 		C26915BF1117BDAD98901CBD /* ControlLibraryItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B494FD5C3B778C6F4AA9AC1 /* ControlLibraryItem.swift */; };
 		F528D06DFB5A19B52DEDA7A1 /* PoseRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB2799F16C3811C0A9B062F6 /* PoseRenderer.swift */; };
 /* End PBXBuildFile section */
@@ -55,6 +56,7 @@
 		2890DBD04F245A9D4774FE30 /* DepthExtractor.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = DepthExtractor.swift; path = LTXDesktop/Services/DepthExtractor.swift; sourceTree = "<group>"; };
 		304C942340DC8FC31DE7C010 /* ControlLibraryView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ControlLibraryView.swift; path = LTXDesktop/Views/ControlLibraryView.swift; sourceTree = "<group>"; };
 		3DAC688BC7819600CE3677B8 /* ControlVideoProcessor.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ControlVideoProcessor.swift; path = LTXDesktop/Services/ControlVideoProcessor.swift; sourceTree = "<group>"; };
+		48E487A9A1D97B3E21F34847 /* DatasetBuilderView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = DatasetBuilderView.swift; path = LTXDesktop/Views/Training/DatasetBuilderView.swift; sourceTree = "<group>"; };
 		5CB92CDBC4A12635EA276F2C /* TrainingModels.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TrainingModels.swift; path = LTXDesktop/Models/TrainingModels.swift; sourceTree = "<group>"; };
 		7B494FD5C3B778C6F4AA9AC1 /* ControlLibraryItem.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ControlLibraryItem.swift; path = LTXDesktop/Models/ControlLibraryItem.swift; sourceTree = "<group>"; };
 		9BB1B682251B332A4F8DAD48 /* TrainingViewModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TrainingViewModel.swift; path = LTXDesktop/ViewModels/TrainingViewModel.swift; sourceTree = "<group>"; };
@@ -115,6 +117,7 @@
 				304C942340DC8FC31DE7C010 /* ControlLibraryView.swift */,
 				5CB92CDBC4A12635EA276F2C /* TrainingModels.swift */,
 				9BB1B682251B332A4F8DAD48 /* TrainingViewModel.swift */,
+				48E487A9A1D97B3E21F34847 /* DatasetBuilderView.swift */,
 			);
 			sourceTree = "<group>";
 		};
@@ -307,6 +310,7 @@
 				200FC88D40591F8E069FEDD4 /* ControlLibraryView.swift in Sources */,
 				531F4C2A502955AC293EA3CB /* TrainingModels.swift in Sources */,
 				833EF0BBD542A5046E698B80 /* TrainingViewModel.swift in Sources */,
+				C220D8C19E34C90E2EBD8320 /* DatasetBuilderView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
