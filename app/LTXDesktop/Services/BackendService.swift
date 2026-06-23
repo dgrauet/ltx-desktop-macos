@@ -238,6 +238,166 @@ class BackendService: ObservableObject {
         return try await post("/api/v1/loras/import", body: Body(source_path: sourcePath))
     }
 
+    // MARK: - Training Datasets
+
+    func listDatasets() async throws -> [TrainingDataset] {
+        return try await get("/api/v1/training/datasets")
+    }
+
+    @discardableResult
+    func createDataset(id: String) async throws -> TrainingDataset {
+        struct Body: Encodable { let dataset_id: String }
+        return try await post("/api/v1/training/datasets", body: Body(dataset_id: id))
+    }
+
+    @discardableResult
+    func uploadClip(datasetId: String, fileURL: URL) async throws -> SuccessResponse {
+        let url = URL(string: "\(baseURL)/api/v1/training/datasets/\(datasetId)/clips")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+
+        let boundary = UUID().uuidString
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+
+        let fileData = try Data(contentsOf: fileURL)
+        let filename = fileURL.lastPathComponent
+        var body = Data()
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: application/octet-stream\r\n\r\n".data(using: .utf8)!)
+        body.append(fileData)
+        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+        request.httpBody = body
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let responseBody = String(data: data, encoding: .utf8) ?? "(no body)"
+            throw BackendError.requestFailed(code, responseBody)
+        }
+        return try decoder.decode(SuccessResponse.self, from: data)
+    }
+
+    func putManifest(datasetId: String, entries: [(video: String, caption: String)]) async throws -> (warnings: [String], violations: [String: [String]]) {
+        struct ManifestEntry: Encodable { let caption: String; let video: String }
+        struct Body: Encodable { let entries: [ManifestEntry] }
+        struct ManifestResponse: Decodable {
+            let ok: Bool
+            let warnings: [String]
+            let violations: [String: [String]]
+        }
+        let body = Body(entries: entries.map { ManifestEntry(caption: $0.caption, video: $0.video) })
+        let url = URL(string: "\(baseURL)/api/v1/training/datasets/\(datasetId)/manifest")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(body)
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let responseBody = String(data: data, encoding: .utf8) ?? "(no body)"
+            throw BackendError.requestFailed(code, responseBody)
+        }
+        let decoded = try decoder.decode(ManifestResponse.self, from: data)
+        return (warnings: decoded.warnings, violations: decoded.violations)
+    }
+
+    @discardableResult
+    func deleteDataset(id: String) async throws -> SuccessResponse {
+        let url = URL(string: "\(baseURL)/api/v1/training/datasets/\(id)")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let responseBody = String(data: data, encoding: .utf8) ?? "(no body)"
+            throw BackendError.requestFailed(code, responseBody)
+        }
+        return try decoder.decode(SuccessResponse.self, from: data)
+    }
+
+    // MARK: - Training Runs
+
+    func preflight(_ config: TrainingConfigRequest) async throws -> PreflightResult {
+        return try await post("/api/v1/training/preflight", body: config)
+    }
+
+    func startRun(_ config: TrainingConfigRequest) async throws -> (runId: String, jobId: String) {
+        struct StartRunResponse: Decodable { let run_id: String; let job_id: String }
+        let response: StartRunResponse = try await post("/api/v1/training/runs", body: config)
+        return (runId: response.run_id, jobId: response.job_id)
+    }
+
+    @discardableResult
+    func cancelRun(id: String) async throws -> SuccessResponse {
+        return try await post("/api/v1/training/runs/\(id)/cancel", body: EmptyBody())
+    }
+
+    func listRuns() async throws -> [TrainingRun] {
+        return try await get("/api/v1/training/runs")
+    }
+
+    @discardableResult
+    func deleteRun(id: String) async throws -> SuccessResponse {
+        let url = URL(string: "\(baseURL)/api/v1/training/runs/\(id)")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let responseBody = String(data: data, encoding: .utf8) ?? "(no body)"
+            throw BackendError.requestFailed(code, responseBody)
+        }
+        return try decoder.decode(SuccessResponse.self, from: data)
+    }
+
+    // MARK: - Training WebSocket
+
+    func connectTraining(jobId: String, onEvent: @escaping (TrainingEvent) -> Void) -> AsyncStream<TrainingEvent> {
+        AsyncStream { continuation in
+            let url = URL(string: "\(wsBaseURL)/ws/progress/\(jobId)")!
+            let task = session.webSocketTask(with: url)
+            task.resume()
+
+            func receiveNext() {
+                task.receive { result in
+                    switch result {
+                    case .success(let message):
+                        switch message {
+                        case .string(let text):
+                            if let data = text.data(using: .utf8),
+                               let event = try? JSONDecoder().decode(TrainingEvent.self, from: data) {
+                                onEvent(event)
+                                continuation.yield(event)
+                                if case .done = event {
+                                    continuation.finish()
+                                    task.cancel(with: .normalClosure, reason: nil)
+                                    return
+                                }
+                                if case .error = event {
+                                    continuation.finish()
+                                    task.cancel(with: .normalClosure, reason: nil)
+                                    return
+                                }
+                            }
+                        default:
+                            break
+                        }
+                        receiveNext()
+                    case .failure:
+                        continuation.finish()
+                    }
+                }
+            }
+
+            receiveNext()
+
+            continuation.onTermination = { _ in
+                task.cancel(with: .normalClosure, reason: nil)
+            }
+        }
+    }
+
     // MARK: - History
 
     func fetchHistory() async throws -> [HistoryEntry] {

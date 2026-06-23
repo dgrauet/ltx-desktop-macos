@@ -25,3 +25,12 @@ def test_preflight_verdict_thresholds():
     assert preflight_verdict(peak_gb=10.0, available_gb=26.0) == "ok"
     assert preflight_verdict(peak_gb=20.0, available_gb=26.0) == "risky"
     assert preflight_verdict(peak_gb=27.0, available_gb=26.0) == "oom"
+
+
+def test_step_malformed_returns_none():
+    """parse_line("STEP:abc") must return None, not raise."""
+    assert parse_line("STEP:abc") is None
+
+
+def test_status_line():
+    assert parse_line("STATUS:Loading model") == {"type": "status", "status": "Loading model"}

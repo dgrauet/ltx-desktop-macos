@@ -1,4 +1,4 @@
-"""Build a 32GB-safe T2V LtxTrainerConfig (overrides dangerous library defaults)."""
+"""Build a T2V LtxTrainerConfig with optional 32GB-safe overrides."""
 from __future__ import annotations
 
 from ltx_trainer_mlx.config import (
@@ -30,15 +30,22 @@ def build_t2v_config(
     learning_rate: float = 5e-4,
     seed: int = 42,
     video_dims: tuple[int, int, int] = (704, 480, 25),
+    low_ram: bool = False,
 ) -> LtxTrainerConfig:
-    """Construct a 32GB-safe T2V LtxTrainerConfig.
+    """Construct a T2V LtxTrainerConfig with optional 32GB-safe overrides.
 
-    Dangerous library defaults are overridden unconditionally:
-    - batch_size forced to 1 (lib default 2 → OOM on 32GB)
-    - enable_gradient_checkpointing forced True (lib default False)
-    - validation.inference_steps forced to 8 (lib default 50 → very slow)
-    - validation.generate_audio forced False (lib default True → extra RAM)
+    Always overridden (both modes):
+    - validation.inference_steps = 8 (lib default 50 → very slow)
+    - validation.generate_audio = False (lib default True → extra RAM)
     - lora.target_modules locked to _TARGET_MODULES (matches inference rename map)
+
+    low_ram=True (opt-in, safe for 32GB / quantized models):
+    - batch_size = 1
+    - enable_gradient_checkpointing = True
+
+    low_ram=False (default, normal training):
+    - batch_size = 2
+    - enable_gradient_checkpointing = False
 
     Args:
         model_path: Path to the transformer weights directory.
@@ -50,10 +57,15 @@ def build_t2v_config(
         learning_rate: AdamW learning rate. Defaults to 5e-4.
         seed: Global RNG seed. Defaults to 42.
         video_dims: Validation video dimensions (W, H, frames). Defaults to (704, 480, 25).
+        low_ram: If True, force batch_size=1 and gradient checkpointing for 32GB safety.
+            Defaults to False.
 
     Returns:
-        A fully-constructed LtxTrainerConfig with 32GB-safe overrides applied.
+        A fully-constructed LtxTrainerConfig.
     """
+    batch_size = 1 if low_ram else 2
+    grad_ckpt = bool(low_ram)
+
     return LtxTrainerConfig(
         model=ModelConfig(
             model_path=model_path,
@@ -73,9 +85,9 @@ def build_t2v_config(
         optimization=OptimizationConfig(
             learning_rate=learning_rate,
             steps=steps,
-            batch_size=1,
+            batch_size=batch_size,
             gradient_accumulation_steps=1,
-            enable_gradient_checkpointing=True,
+            enable_gradient_checkpointing=grad_ckpt,
             optimizer_type="adamw",
             scheduler_params={},
         ),

@@ -5,6 +5,7 @@ struct ContentView: View {
     @EnvironmentObject var backendService: BackendService
     @StateObject private var queueVM = QueueViewModel()
     @StateObject private var generationVM = GenerationViewModel()
+    @StateObject private var trainingVM = TrainingViewModel()
 
     enum Tab: String, CaseIterable {
         case generation = "Generation"
@@ -12,6 +13,7 @@ struct ContentView: View {
         case history = "History"
         case controlVideos = "Control Videos"
         case lora = "LoRA"
+        case training = "Training"
         case settings = "Settings"
     }
 
@@ -56,6 +58,16 @@ struct ContentView: View {
                             ControlLibraryView(onUse: { selectedTab = .generation })
                         case .lora:
                             LoRAView()
+                        case .training:
+                            ScrollView {
+                                VStack(spacing: 0) {
+                                    DatasetBuilderView()
+                                    Divider()
+                                    TrainingConfigView()
+                                    Divider()
+                                    TrainingRunView()
+                                }
+                            }
                         case .settings:
                             SettingsView()
                         }
@@ -82,6 +94,7 @@ struct ContentView: View {
             }
         }
         .environmentObject(generationVM)
+        .environmentObject(trainingVM)
     }
 
     private func sidebarButton(_ tab: Tab) -> some View {
@@ -223,6 +236,7 @@ struct ContentView: View {
         case .history: return "clock.arrow.circlepath"
         case .controlVideos: return "square.stack.3d.up"
         case .lora: return "puzzlepiece.extension"
+        case .training: return "brain.head.profile"
         case .settings: return "gear"
         }
     }

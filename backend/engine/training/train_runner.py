@@ -80,6 +80,20 @@ def main() -> int:  # noqa: PLR0911  (multiple return paths are intentional)
         help="LoRA rank. Default: 32.",
     )
     ap.add_argument(
+        "--learning-rate",
+        type=float,
+        default=5e-4,
+        metavar="LR",
+        help="AdamW learning rate. Default: 5e-4.",
+    )
+    ap.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        metavar="N",
+        help="Global RNG seed. Default: 42.",
+    )
+    ap.add_argument(
         "--preflight",
         type=int,
         default=0,
@@ -87,6 +101,14 @@ def main() -> int:  # noqa: PLR0911  (multiple return paths are intentional)
         help=(
             "If >0, run N steps to measure peak memory then exit without "
             "producing a final LoRA. Emits PREFLIGHT_PEAK_GB:<value>."
+        ),
+    )
+    ap.add_argument(
+        "--low-ram",
+        action="store_true",
+        help=(
+            "Enable 32GB-safe overrides: batch_size=1, gradient checkpointing. "
+            "Recommended for quantized models or machines with ≤32GB RAM."
         ),
     )
     args = ap.parse_args()
@@ -106,7 +128,10 @@ def main() -> int:  # noqa: PLR0911  (multiple return paths are intentional)
         output_dir=args.output,
         steps=steps,
         rank=args.rank,
+        learning_rate=args.learning_rate,
+        seed=args.seed,
         video_dims=(704, 480, 25),
+        low_ram=args.low_ram,
     )
 
     def step_callback(current_step: int, total_steps: int, sampled_video_paths: list[Path]) -> None:

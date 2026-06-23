@@ -13,8 +13,12 @@
 		0AAC86262F5C6216008A3AFC /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AAC86252F5C6216008A3AFC /* SettingsView.swift */; };
 		139231FC0B4ECDABC014B84D /* ControlVideoProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DAC688BC7819600CE3677B8 /* ControlVideoProcessor.swift */; };
 		200FC88D40591F8E069FEDD4 /* ControlLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 304C942340DC8FC31DE7C010 /* ControlLibraryView.swift */; };
+		531F4C2A502955AC293EA3CB /* TrainingModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CB92CDBC4A12635EA276F2C /* TrainingModels.swift */; };
 		549CB28D7CA81B0B6371C5E5 /* DepthExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2890DBD04F245A9D4774FE30 /* DepthExtractor.swift */; };
 		813ADB5575FD0CA88B67A75E /* CoreMLModelManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 150ADC61E3398DAB809A4539 /* CoreMLModelManager.swift */; };
+		833EF0BBD542A5046E698B80 /* TrainingViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BB1B682251B332A4F8DAD48 /* TrainingViewModel.swift */; };
+		8A8F665D050D17E1F06AF908 /* TrainingRunView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FCDD405E84624AFDA2BCCC6 /* TrainingRunView.swift */; };
+		9641F12FECAD3DA98C340B49 /* TrainingConfigView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 520C5EA0B05EB0D960C086B7 /* TrainingConfigView.swift */; };
 		A100000001 /* LTXDesktopApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000001 /* LTXDesktopApp.swift */; };
 		A100000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000002 /* ContentView.swift */; };
 		A100000003 /* ProcessManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000003 /* ProcessManager.swift */; };
@@ -41,6 +45,7 @@
 		A100000019 /* ExtendSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000019 /* ExtendSheet.swift */; };
 		A10000001A /* GenerationPreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000001A /* GenerationPreset.swift */; };
 		A3507D63F214EEA1C8E745FE /* ControlLibraryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B022FD2E66D75C6963A7E45D /* ControlLibraryStore.swift */; };
+		C220D8C19E34C90E2EBD8320 /* DatasetBuilderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48E487A9A1D97B3E21F34847 /* DatasetBuilderView.swift */; };
 		C26915BF1117BDAD98901CBD /* ControlLibraryItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B494FD5C3B778C6F4AA9AC1 /* ControlLibraryItem.swift */; };
 		F528D06DFB5A19B52DEDA7A1 /* PoseRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB2799F16C3811C0A9B062F6 /* PoseRenderer.swift */; };
 /* End PBXBuildFile section */
@@ -53,7 +58,12 @@
 		2890DBD04F245A9D4774FE30 /* DepthExtractor.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = DepthExtractor.swift; path = LTXDesktop/Services/DepthExtractor.swift; sourceTree = "<group>"; };
 		304C942340DC8FC31DE7C010 /* ControlLibraryView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ControlLibraryView.swift; path = LTXDesktop/Views/ControlLibraryView.swift; sourceTree = "<group>"; };
 		3DAC688BC7819600CE3677B8 /* ControlVideoProcessor.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ControlVideoProcessor.swift; path = LTXDesktop/Services/ControlVideoProcessor.swift; sourceTree = "<group>"; };
+		48E487A9A1D97B3E21F34847 /* DatasetBuilderView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = DatasetBuilderView.swift; path = LTXDesktop/Views/Training/DatasetBuilderView.swift; sourceTree = "<group>"; };
+		4FCDD405E84624AFDA2BCCC6 /* TrainingRunView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TrainingRunView.swift; path = LTXDesktop/Views/Training/TrainingRunView.swift; sourceTree = "<group>"; };
+		520C5EA0B05EB0D960C086B7 /* TrainingConfigView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TrainingConfigView.swift; path = LTXDesktop/Views/Training/TrainingConfigView.swift; sourceTree = "<group>"; };
+		5CB92CDBC4A12635EA276F2C /* TrainingModels.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TrainingModels.swift; path = LTXDesktop/Models/TrainingModels.swift; sourceTree = "<group>"; };
 		7B494FD5C3B778C6F4AA9AC1 /* ControlLibraryItem.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ControlLibraryItem.swift; path = LTXDesktop/Models/ControlLibraryItem.swift; sourceTree = "<group>"; };
+		9BB1B682251B332A4F8DAD48 /* TrainingViewModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TrainingViewModel.swift; path = LTXDesktop/ViewModels/TrainingViewModel.swift; sourceTree = "<group>"; };
 		A200000001 /* LTXDesktopApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LTXDesktopApp.swift; sourceTree = "<group>"; };
 		A200000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		A200000003 /* ProcessManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessManager.swift; sourceTree = "<group>"; };
@@ -109,6 +119,11 @@
 				B022FD2E66D75C6963A7E45D /* ControlLibraryStore.swift */,
 				A8A25FC2B53B43CE6A857797 /* ControlLibraryViewModel.swift */,
 				304C942340DC8FC31DE7C010 /* ControlLibraryView.swift */,
+				5CB92CDBC4A12635EA276F2C /* TrainingModels.swift */,
+				9BB1B682251B332A4F8DAD48 /* TrainingViewModel.swift */,
+				48E487A9A1D97B3E21F34847 /* DatasetBuilderView.swift */,
+				520C5EA0B05EB0D960C086B7 /* TrainingConfigView.swift */,
+				4FCDD405E84624AFDA2BCCC6 /* TrainingRunView.swift */,
 			);
 			sourceTree = "<group>";
 		};
@@ -299,6 +314,11 @@
 				A3507D63F214EEA1C8E745FE /* ControlLibraryStore.swift in Sources */,
 				07803A4F16F480E97CF71F03 /* ControlLibraryViewModel.swift in Sources */,
 				200FC88D40591F8E069FEDD4 /* ControlLibraryView.swift in Sources */,
+				531F4C2A502955AC293EA3CB /* TrainingModels.swift in Sources */,
+				833EF0BBD542A5046E698B80 /* TrainingViewModel.swift in Sources */,
+				C220D8C19E34C90E2EBD8320 /* DatasetBuilderView.swift in Sources */,
+				9641F12FECAD3DA98C340B49 /* TrainingConfigView.swift in Sources */,
+				8A8F665D050D17E1F06AF908 /* TrainingRunView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -63,3 +63,78 @@ def test_zero_frame_message_wording(tmp_path):
     assert any("corrupt" in v or "could not read" in v for v in violations), (
         f"expected corrupt/unreadable message, got: {violations}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Task 3: dataset directory management + materialize_captions
+# ---------------------------------------------------------------------------
+
+import dataset_store as ds  # noqa: E402 — import after module-level fixtures
+
+
+def test_create_dataset_makes_dirs(tmp_path, monkeypatch):
+    monkeypatch.setattr(ds, "TRAINING_DIR", tmp_path)
+    result = ds.create_dataset("myds")
+    assert result == ds.dataset_dir("myds")
+    assert ds.clips_dir("myds").is_dir()
+    assert ds.captions_dir("myds").is_dir()
+
+
+def test_materialize_captions_writes_per_clip_txt(tmp_path, monkeypatch):
+    monkeypatch.setattr(ds, "TRAINING_DIR", tmp_path)
+    ds.create_dataset("d1")
+    (ds.clips_dir("d1") / "a.mp4").write_bytes(b"x")
+    ds.write_manifest(str(ds.dataset_dir("d1")), [{"caption": "a cat", "video": "a.mp4"}])
+    ds.materialize_captions("d1")
+    assert (ds.captions_dir("d1") / "a.txt").read_text() == "a cat"
+
+
+def test_materialize_captions_multiple_clips(tmp_path, monkeypatch):
+    monkeypatch.setattr(ds, "TRAINING_DIR", tmp_path)
+    ds.create_dataset("d2")
+    entries = [
+        {"caption": "a dog", "video": "clips/b.mp4"},
+        {"caption": "a fish", "video": "sub/c.mp4"},
+    ]
+    ds.write_manifest(str(ds.dataset_dir("d2")), entries)
+    ds.materialize_captions("d2")
+    assert (ds.captions_dir("d2") / "b.txt").read_text() == "a dog"
+    assert (ds.captions_dir("d2") / "c.txt").read_text() == "a fish"
+
+
+def test_list_datasets(tmp_path, monkeypatch):
+    monkeypatch.setattr(ds, "TRAINING_DIR", tmp_path)
+    ds.create_dataset("ls1")
+    ds.create_dataset("ls2")
+    (ds.clips_dir("ls1") / "v.mp4").write_bytes(b"video")
+    datasets = ds.list_datasets()
+    ids = {d["id"] for d in datasets}
+    assert {"ls1", "ls2"}.issubset(ids)
+    ls1 = next(d for d in datasets if d["id"] == "ls1")
+    assert ls1["clip_count"] == 1
+    assert ls1["disk_bytes"] > 0
+    assert ls1["has_precomputed"] is False
+
+
+def test_list_datasets_has_precomputed(tmp_path, monkeypatch):
+    monkeypatch.setattr(ds, "TRAINING_DIR", tmp_path)
+    ds.create_dataset("pre1")
+    ds.precomputed_dir("pre1").mkdir(parents=True, exist_ok=True)
+    datasets = ds.list_datasets()
+    pre1 = next(d for d in datasets if d["id"] == "pre1")
+    assert pre1["has_precomputed"] is True
+
+
+def test_delete_dataset(tmp_path, monkeypatch):
+    monkeypatch.setattr(ds, "TRAINING_DIR", tmp_path)
+    ds.create_dataset("del1")
+    assert ds.dataset_dir("del1").exists()
+    result = ds.delete_dataset("del1")
+    assert result is True
+    assert not ds.dataset_dir("del1").exists()
+
+
+def test_delete_dataset_nonexistent(tmp_path, monkeypatch):
+    monkeypatch.setattr(ds, "TRAINING_DIR", tmp_path)
+    result = ds.delete_dataset("ghost")
+    assert result is False
