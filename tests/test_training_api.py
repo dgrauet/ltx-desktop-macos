@@ -9,7 +9,6 @@ from __future__ import annotations
 import io
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 
 import dataset_store
@@ -152,11 +151,10 @@ def test_put_manifest_writes_file(monkeypatch, tmp_path):
     """PUT manifest with valid entries writes manifest.json when no hard violations."""
     _patch_training_dir(monkeypatch, tmp_path)
     client.post("/api/v1/training/datasets", json={"dataset_id": "write-ds"})
-    # Create the clip files so validate_clip can open them (file-not-found violation
-    # is a hard violation per spec; write a real clip here is complex, so we check
-    # the manifest is written only when no violations block it — use a dummy file
-    # that exists but is treated as corrupt; the manifest IS written even with violations
-    # per the actual implementation).
+    # manifest.json is written regardless of per-clip media violations; only an
+    # empty/whitespace caption blocks the write (-> HTTP 400). Here the caption is
+    # valid, so the manifest must be persisted even though the dummy clip will fail
+    # media validation (its violations are reported in the response body).
     clip = dataset_store.clips_dir("write-ds") / "vid.mp4"
     clip.write_bytes(b"\x00")  # file exists; validate_clip will probe it
     r = client.put(
@@ -199,3 +197,35 @@ def test_delete_removes_from_list(monkeypatch, tmp_path):
     r = client.get("/api/v1/training/datasets")
     ids = [d["id"] for d in r.json()]
     assert "gone-ds" not in ids
+
+
+# ---------------------------------------------------------------------------
+# Security: path traversal
+# ---------------------------------------------------------------------------
+
+
+def test_clip_upload_rejects_traversal_filename(monkeypatch, tmp_path):
+    """Uploading a clip with a traversal filename must return HTTP 400."""
+    _patch_training_dir(monkeypatch, tmp_path)
+    client.post("/api/v1/training/datasets", json={"dataset_id": "trav-ds"})
+    r = client.post(
+        "/api/v1/training/datasets/trav-ds/clips",
+        files={"file": ("../evil.mp4", io.BytesIO(b"\x00"), "video/mp4")},
+    )
+    assert r.status_code == 400
+    # The escape target must NOT have been written.
+    assert not (tmp_path / "evil.mp4").exists()
+
+
+def test_dataset_id_traversal_rejected(monkeypatch, tmp_path):
+    """A traversal dataset_id must be rejected with HTTP 400 on create and delete."""
+    _patch_training_dir(monkeypatch, tmp_path)
+    r_create = client.post(
+        "/api/v1/training/datasets", json={"dataset_id": "../escape"}
+    )
+    assert r_create.status_code == 400
+
+    # A bare ".." in the path is normalised away by the URL layer before routing,
+    # so send it URL-encoded so it reaches (and is rejected by) the handler.
+    r_delete = client.delete("/api/v1/training/datasets/%2e%2e")
+    assert r_delete.status_code == 400

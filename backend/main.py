@@ -12,9 +12,11 @@ import asyncio
 import logging
 import platform
 import random
+import re
 import subprocess
 import uuid
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
@@ -227,8 +229,6 @@ def _resolve_seed(seed: int) -> int:
     if seed < 0:
         return random.randint(0, 2**31 - 1)
     return seed
-
-
 
 
 def _resolve_lora_args(lora_ids: list[str]) -> list[str] | None:
@@ -1557,6 +1557,30 @@ async def import_lora(req: ImportLoRARequest):
 
 # --- Training dataset endpoints ---
 
+_DATASET_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+def _safe_dataset_id(dataset_id: str) -> str:
+    """Validate a dataset_id against the allowed pattern and return it.
+
+    Accepts only identifiers matching ``[A-Za-z0-9_-]{1,64}``.  Any other
+    value — including path-traversal sequences such as ``..`` or values
+    containing ``/`` — is rejected with HTTP 400.
+
+    Args:
+        dataset_id: The raw dataset identifier to validate.
+
+    Returns:
+        The validated dataset_id (unchanged if valid).
+
+    Raises:
+        HTTPException: 400 if the id contains path-traversal sequences or
+            characters outside [A-Za-z0-9_-].
+    """
+    if not _DATASET_ID_RE.match(dataset_id):
+        raise HTTPException(status_code=400, detail="Invalid dataset_id")
+    return dataset_id
+
 
 class CreateDatasetRequest(BaseModel):
     """Request to create a new training dataset."""
@@ -1584,8 +1608,9 @@ async def create_training_dataset(req: CreateDatasetRequest):
     Returns:
         JSON with dataset_id of the created dataset.
     """
-    dataset_store.create_dataset(req.dataset_id)
-    return {"dataset_id": req.dataset_id}
+    dataset_id = _safe_dataset_id(req.dataset_id)
+    dataset_store.create_dataset(dataset_id)
+    return {"dataset_id": dataset_id}
 
 
 @app.get("/api/v1/training/datasets")
@@ -1609,11 +1634,26 @@ async def upload_training_clip(dataset_id: str, file: UploadFile = File(...)):
     Returns:
         JSON with filename of the saved clip.
     """
+    dataset_id = _safe_dataset_id(dataset_id)
+    raw_name = file.filename or ""
+    safe_name = Path(raw_name).name
+    # Reject anything that is not already a bare basename — a filename carrying a
+    # path component (e.g. "../evil.mp4") is a traversal attempt, not a clip name.
+    if (
+        not safe_name
+        or safe_name in {".", ".."}
+        or "/" in raw_name
+        or "\\" in raw_name
+        or raw_name != safe_name
+    ):
+        raise HTTPException(status_code=400, detail="Invalid filename")
     clips = dataset_store.clips_dir(dataset_id)
     clips.mkdir(parents=True, exist_ok=True)
-    dest = clips / file.filename
+    dest = clips / safe_name
+    if not dest.resolve().is_relative_to(clips.resolve()):
+        raise HTTPException(status_code=400, detail="Invalid filename")
     dest.write_bytes(await file.read())
-    return {"filename": file.filename}
+    return {"filename": safe_name}
 
 
 @app.put("/api/v1/training/datasets/{dataset_id}/manifest")
@@ -1631,15 +1671,26 @@ async def put_training_manifest(dataset_id: str, req: PutManifestRequest):
     Returns:
         JSON with ok, warnings list, and violations dict keyed by video path.
     """
+    dataset_id = _safe_dataset_id(dataset_id)
+    # Reject any entry whose video field is absolute or contains path traversal.
+    for e in req.entries:
+        vid_path = Path(e.video)
+        if vid_path.name != e.video or e.video != Path(e.video).name:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid video path in manifest entry: {e.video!r}",
+            )
     entries = [{"caption": e.caption, "video": e.video} for e in req.entries]
     try:
         manifest = dataset_store.build_manifest(entries)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    clips = dataset_store.clips_dir(dataset_id)
     violations: dict[str, list[str]] = {}
     for entry in manifest:
-        clip_violations = dataset_store.validate_clip(entry["video"])
+        clip_path = str(clips / Path(entry["video"]).name)
+        clip_violations = dataset_store.validate_clip(clip_path)
         if clip_violations:
             violations[entry["video"]] = clip_violations
 
@@ -1659,6 +1710,7 @@ async def delete_training_dataset(dataset_id: str):
     Returns:
         JSON with deleted bool (True if deleted, False if not found).
     """
+    dataset_id = _safe_dataset_id(dataset_id)
     deleted = dataset_store.delete_dataset(dataset_id)
     return {"deleted": deleted}
 
