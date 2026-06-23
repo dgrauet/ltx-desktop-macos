@@ -89,6 +89,14 @@ def main() -> int:  # noqa: PLR0911  (multiple return paths are intentional)
             "producing a final LoRA. Emits PREFLIGHT_PEAK_GB:<value>."
         ),
     )
+    ap.add_argument(
+        "--low-ram",
+        action="store_true",
+        help=(
+            "Enable 32GB-safe overrides: batch_size=1, gradient checkpointing. "
+            "Recommended for quantized models or machines with ≤32GB RAM."
+        ),
+    )
     args = ap.parse_args()
 
     # Heavy imports kept inside main() so --help exits fast.
@@ -107,6 +115,7 @@ def main() -> int:  # noqa: PLR0911  (multiple return paths are intentional)
         steps=steps,
         rank=args.rank,
         video_dims=(704, 480, 25),
+        low_ram=args.low_ram,
     )
 
     def step_callback(current_step: int, total_steps: int, sampled_video_paths: list[Path]) -> None:
