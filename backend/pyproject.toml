@@ -9,6 +9,7 @@ dependencies = [
     "mlx>=0.31.0",
     "ltx-core-mlx @ git+https://github.com/dgrauet/ltx-2-mlx@main#subdirectory=packages/ltx-core-mlx",
     "ltx-pipelines-mlx @ git+https://github.com/dgrauet/ltx-2-mlx@main#subdirectory=packages/ltx-pipelines-mlx",
+    "ltx-trainer-mlx @ git+https://github.com/dgrauet/ltx-2-mlx@main#subdirectory=packages/ltx-trainer",
     # API
     "fastapi>=0.115.0",
     "uvicorn>=0.32.0",
