@@ -238,6 +238,7 @@ dependencies = [
     { name = "huggingface-hub", marker = "sys_platform == 'darwin'" },
     { name = "ltx-core-mlx", marker = "sys_platform == 'darwin'" },
     { name = "ltx-pipelines-mlx", marker = "sys_platform == 'darwin'" },
+    { name = "ltx-trainer-mlx", marker = "sys_platform == 'darwin'" },
     { name = "mlx", marker = "sys_platform == 'darwin'" },
     { name = "numpy", marker = "sys_platform == 'darwin'" },
     { name = "opencv-python", marker = "sys_platform == 'darwin'" },
@@ -266,6 +267,7 @@ requires-dist = [
     { name = "huggingface-hub", specifier = ">=0.26.0" },
     { name = "ltx-core-mlx", git = "https://github.com/dgrauet/ltx-2-mlx?subdirectory=packages%2Fltx-core-mlx&rev=main" },
     { name = "ltx-pipelines-mlx", git = "https://github.com/dgrauet/ltx-2-mlx?subdirectory=packages%2Fltx-pipelines-mlx&rev=main" },
+    { name = "ltx-trainer-mlx", git = "https://github.com/dgrauet/ltx-2-mlx?subdirectory=packages%2Fltx-trainer&rev=main" },
     { name = "mlx", specifier = ">=0.31.0" },
     { name = "numpy", specifier = ">=1.26.0" },
     { name = "opencv-python", specifier = ">=4.10.0" },
@@ -291,6 +293,23 @@ dependencies = [
     { name = "ltx-core-mlx", marker = "sys_platform == 'darwin'" },
     { name = "mlx-arsenal", marker = "sys_platform == 'darwin'" },
     { name = "pillow", marker = "sys_platform == 'darwin'" },
+    { name = "tqdm", marker = "sys_platform == 'darwin'" },
+]
+
+[[package]]
+name = "ltx-trainer-mlx"
+version = "0.14.11"
+source = { git = "https://github.com/dgrauet/ltx-2-mlx?subdirectory=packages%2Fltx-trainer&rev=main#59a42d7f0eafd397c5c421868877c1b6d5324910" }
+dependencies = [
+    { name = "ltx-core-mlx", marker = "sys_platform == 'darwin'" },
+    { name = "ltx-pipelines-mlx", marker = "sys_platform == 'darwin'" },
+    { name = "mlx", marker = "sys_platform == 'darwin'" },
+    { name = "numpy", marker = "sys_platform == 'darwin'" },
+    { name = "pillow", marker = "sys_platform == 'darwin'" },
+    { name = "pydantic", marker = "sys_platform == 'darwin'" },
+    { name = "pyyaml", marker = "sys_platform == 'darwin'" },
+    { name = "rich", marker = "sys_platform == 'darwin'" },
+    { name = "safetensors", marker = "sys_platform == 'darwin'" },
     { name = "tqdm", marker = "sys_platform == 'darwin'" },
 ]
 
