@@ -25,9 +25,10 @@ from pydantic import BaseModel, Field
 import dataset_store
 import history_store
 import preset_manager
+import training_store
 from engine.lora_manager import LoRAManager
 from engine.memory_manager import aggressive_cleanup, get_memory_stats, memory_pressure_monitor
-from engine.mlx_runner import run_prompt_enhance
+from engine.mlx_runner import get_model_repo, get_python_binary, run_prompt_enhance
 from engine.model_download_manager import ModelDownloadManager, resolve_ic_lora_path
 from engine.model_manager import ModelManager
 from engine.pipelines.audio_to_video import AudioToVideoPipeline
@@ -353,6 +354,29 @@ class SuccessResponse(BaseModel):
     """Generic success/failure response."""
     success: bool
     message: str = ""
+
+
+class TrainingPreflightRequest(BaseModel):
+    """Request to run a training preflight memory check."""
+    dataset_id: str = Field(..., min_length=1)
+    low_ram: bool = Field(default=False)
+    rank: int = Field(default=32, ge=1, le=128)
+
+
+class TrainingRunRequest(BaseModel):
+    """Request to start a LoRA training run."""
+    dataset_id: str = Field(..., min_length=1)
+    low_ram: bool = Field(default=False)
+    rank: int = Field(default=32, ge=1, le=128)
+    steps: int = Field(..., ge=1, le=10000)
+    learning_rate: float | None = Field(default=None)
+    seed: int | None = Field(default=None)
+
+
+class TrainingRunResponse(BaseModel):
+    """Response after starting a training run."""
+    run_id: str
+    job_id: str
 
 
 # --- System endpoints ---
@@ -745,6 +769,13 @@ def _check_queue_paused() -> None:
         )
 
 
+def _check_training_lock() -> None:
+    """Raise 409 if training is in progress."""
+    from training_lock import training_lock as _tl
+    if _tl.is_held():
+        raise HTTPException(status_code=409, detail="Training in progress")
+
+
 @app.post("/api/v1/generate/text-to-video", response_model=QueueSubmitResponse)
 async def generate_t2v(req: T2VRequest, priority: str = "normal"):
     """Submit a text-to-video generation job to the queue.
@@ -754,6 +785,7 @@ async def generate_t2v(req: T2VRequest, priority: str = "normal"):
         priority: Job priority (high, normal, low). Default: normal.
     """
     _check_queue_paused()
+    _check_training_lock()
     job_id = str(uuid.uuid4())[:8]
     pri = _PRIORITY_MAP.get(priority, Priority.NORMAL)
     jobs[job_id] = {
@@ -784,6 +816,7 @@ async def generate_i2v(req: I2VRequest, priority: str = "normal"):
         priority: Job priority (high, normal, low). Default: normal.
     """
     _check_queue_paused()
+    _check_training_lock()
     job_id = str(uuid.uuid4())[:8]
     pri = _PRIORITY_MAP.get(priority, Priority.NORMAL)
     jobs[job_id] = {
@@ -936,6 +969,7 @@ async def generate_a2v(req: A2VRequest, priority: str = "normal"):
         priority: Job priority (high, normal, low). Default: normal.
     """
     _check_queue_paused()
+    _check_training_lock()
     job_id = str(uuid.uuid4())[:8]
     pri = _PRIORITY_MAP.get(priority, Priority.NORMAL)
     jobs[job_id] = {
@@ -1020,6 +1054,7 @@ async def _run_a2v(job_id: str, req: A2VRequest) -> None:
 async def generate_ic_lora(req: ICLoraRequest, priority: str = "normal"):
     """Submit an IC-LoRA controlled generation job to the queue."""
     _check_queue_paused()
+    _check_training_lock()
     job_id = str(uuid.uuid4())[:8]
     pri = _PRIORITY_MAP.get(priority, Priority.NORMAL)
     jobs[job_id] = {
@@ -1093,6 +1128,7 @@ async def _run_ic_lora(job_id: str, req: ICLoraRequest) -> None:
 @app.post("/api/v1/generate/retake", response_model=QueueSubmitResponse)
 async def generate_retake(req: RetakeRequest, priority: str = "normal"):
     """Submit a retake (segment regeneration) job to the queue."""
+    _check_training_lock()
     job_id = str(uuid.uuid4())[:8]
     pri = _PRIORITY_MAP.get(priority, Priority.NORMAL)
     jobs[job_id] = {
@@ -1116,6 +1152,7 @@ async def generate_retake(req: RetakeRequest, priority: str = "normal"):
 @app.post("/api/v1/generate/extend", response_model=QueueSubmitResponse)
 async def generate_extend(req: ExtendRequest, priority: str = "normal"):
     """Submit a video extension job to the queue."""
+    _check_training_lock()
     job_id = str(uuid.uuid4())[:8]
     pri = _PRIORITY_MAP.get(priority, Priority.NORMAL)
     jobs[job_id] = {
@@ -1502,6 +1539,20 @@ async def _broadcast_progress(
         ws_connections[job_id].remove(ws)
 
 
+async def _broadcast_training(job_id: str, event: dict) -> None:
+    """Broadcast a training event dict to all WebSocket connections for a job."""
+    if job_id not in ws_connections:
+        return
+    dead: list[WebSocket] = []
+    for ws in ws_connections[job_id]:
+        try:
+            await ws.send_json(event)
+        except Exception:
+            dead.append(ws)
+    for ws in dead:
+        ws_connections[job_id].remove(ws)
+
+
 # --- LoRA endpoints ---
 
 @app.get("/api/v1/loras", response_model=list[LoRAInfoResponse])
@@ -1812,6 +1863,341 @@ async def export_fcpxml(req: ExportFCPXMLRequest):
     output_path.write_text(fcpxml, encoding="utf-8")
     log.info("FCPXML exported: %s", output_path)
     return PathResponse(output_path=str(output_path))
+
+
+# --- Training run endpoints ---
+
+async def _training_supervisor(
+    run_id: str,
+    job_id: str,
+    dataset_id: str,
+    low_ram: bool,
+    rank: int,
+    steps: int,
+) -> None:
+    """Background task: preprocess → train → import LoRA."""
+    from training_lock import training_lock as _tl
+    from engine.training import protocol as _proto
+
+    if not _tl.try_acquire("training"):
+        training_store.update_run(run_id, status="failed", error="Training lock held by another job")
+        return
+
+    backend_dir = Path(__file__).resolve().parent
+    python_bin = get_python_binary()
+    model_path, _ = get_model_repo(selected_video_model)
+    data_root = str(dataset_store.dataset_dir(dataset_id))
+    precomputed = dataset_store.precomputed_dir(dataset_id)
+    output_dir = str(training_store.run_dir(run_id))
+
+    try:
+        # Materialize captions
+        dataset_store.materialize_captions(dataset_id)
+
+        # Preprocess if needed
+        if not precomputed.exists():
+            training_store.update_run(run_id, status="preprocessing")
+            await _broadcast_training(job_id, {"type": "status", "status": "preprocessing"})
+            preprocess_cmd = [
+                python_bin, "-m", "engine.training.preprocess_runner",
+                "--manifest", str(dataset_store.clips_dir(dataset_id)),
+                "--out", data_root,
+                "--model", model_path,
+                "--captions-dir", str(dataset_store.captions_dir(dataset_id)),
+            ]
+            proc = await asyncio.create_subprocess_exec(
+                *preprocess_cmd,
+                stderr=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.DEVNULL,
+                cwd=str(backend_dir),
+            )
+            assert proc.stderr is not None
+            async for raw_line in proc.stderr:
+                line = raw_line.decode(errors="replace").rstrip()
+                evt = _proto.parse_line(line)
+                if evt:
+                    await _broadcast_training(job_id, evt)
+            await proc.wait()
+            if proc.returncode != 0:
+                training_store.update_run(run_id, status="failed", error="Preprocessing failed")
+                await _broadcast_training(job_id, {"type": "error", "message": "Preprocessing failed"})
+                return
+
+        # Train (with optional retry on Metal Impacting Interactivity)
+        training_store.update_run(run_id, status="training")
+        await _broadcast_training(job_id, {"type": "status", "status": "training"})
+
+        train_cmd = [
+            python_bin, "-m", "engine.training.train_runner",
+            "--data-root", data_root,
+            "--model", model_path,
+            "--text-encoder", model_path,
+            "--output", output_dir,
+            "--steps", str(steps),
+            "--rank", str(rank),
+        ]
+        if low_ram:
+            train_cmd.append("--low-ram")
+
+        for attempt in range(2):
+            stderr_tail: list[str] = []
+            lora_path: str | None = None
+            peak_mem_gb: float = 0.0
+
+            proc = await asyncio.create_subprocess_exec(
+                *train_cmd,
+                stderr=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.DEVNULL,
+                cwd=str(backend_dir),
+            )
+            assert proc.stderr is not None
+            async for raw_line in proc.stderr:
+                line = raw_line.decode(errors="replace").rstrip()
+                stderr_tail.append(line)
+                if len(stderr_tail) > 40:
+                    stderr_tail.pop(0)
+                evt = _proto.parse_line(line)
+                if evt:
+                    if evt["type"] == "step" and evt.get("peak_mem_gb", 0) > peak_mem_gb:
+                        peak_mem_gb = evt["peak_mem_gb"]
+                        training_store.update_run(run_id, peak_mem_gb=peak_mem_gb)
+                    elif evt["type"] == "done":
+                        lora_path = evt["lora_path"]
+                    await _broadcast_training(job_id, evt)
+            await proc.wait()
+
+            if proc.returncode == 0:
+                break
+            # Retry once if Metal Impacting Interactivity (thermal throttle)
+            tail_text = "\n".join(stderr_tail)
+            if attempt == 0 and "Impacting Interactivity" in tail_text:
+                log.warning("Run %s: Metal throttle detected, retrying once", run_id)
+                await _broadcast_training(job_id, {"type": "status", "status": "retrying"})
+                continue
+            # Failed definitively
+            training_store.update_run(run_id, status="failed", error=tail_text[-500:] if tail_text else "train_runner exited non-zero")
+            await _broadcast_training(job_id, {"type": "error", "message": "Training failed"})
+            return
+
+        if lora_path:
+            try:
+                imported = lora_manager.import_lora(lora_path)
+                training_store.update_run(run_id, status="completed", lora_path=imported.path)
+                await _broadcast_training(job_id, {"type": "done", "lora_path": imported.path})
+            except Exception as exc:
+                log.error("Run %s: LoRA import failed: %s", run_id, exc)
+                training_store.update_run(run_id, status="failed", error=f"LoRA import failed: {exc}")
+        else:
+            training_store.update_run(run_id, status="completed")
+            await _broadcast_training(job_id, {"type": "done", "lora_path": None})
+
+    except Exception as exc:
+        log.error("Run %s: supervisor error: %s", run_id, exc)
+        training_store.update_run(run_id, status="failed", error=str(exc))
+        await _broadcast_training(job_id, {"type": "error", "message": str(exc)})
+    finally:
+        _tl.release("training")
+
+
+@app.post("/api/v1/training/preflight")
+async def training_preflight(req: TrainingPreflightRequest):
+    """Run a preflight check to estimate peak GPU memory for a training run.
+
+    Acquires the training lock, runs 3 warmup steps, reports PREFLIGHT_PEAK_GB,
+    then releases the lock.
+
+    Args:
+        req: Dataset id, low_ram flag, and LoRA rank.
+
+    Returns:
+        JSON with verdict (ok/risky/oom) and peak_gb.
+    """
+    from training_lock import training_lock as _tl
+    from engine.training import protocol as _proto
+
+    dataset_id = _safe_dataset_id(req.dataset_id)
+
+    if not _tl.try_acquire("training"):
+        raise HTTPException(status_code=409, detail="Training in progress")
+
+    backend_dir = Path(__file__).resolve().parent
+    python_bin = get_python_binary()
+    model_path, _ = get_model_repo(selected_video_model)
+
+    try:
+        dataset_store.materialize_captions(dataset_id)
+
+        # Preprocess if not done yet
+        precomputed = dataset_store.precomputed_dir(dataset_id)
+        if not precomputed.exists():
+            preprocess_cmd = [
+                python_bin, "-m", "engine.training.preprocess_runner",
+                "--manifest", str(dataset_store.clips_dir(dataset_id)),
+                "--out", str(dataset_store.dataset_dir(dataset_id)),
+                "--model", model_path,
+                "--captions-dir", str(dataset_store.captions_dir(dataset_id)),
+            ]
+            proc = await asyncio.create_subprocess_exec(
+                *preprocess_cmd,
+                stderr=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.DEVNULL,
+                cwd=str(backend_dir),
+            )
+            await proc.wait()
+            if proc.returncode != 0:
+                raise HTTPException(status_code=500, detail="Preprocessing failed during preflight")
+
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp_out:
+            preflight_cmd = [
+                python_bin, "-m", "engine.training.train_runner",
+                "--data-root", str(dataset_store.dataset_dir(dataset_id)),
+                "--model", model_path,
+                "--text-encoder", model_path,
+                "--output", tmp_out,
+                "--steps", "3",
+                "--rank", str(req.rank),
+                "--preflight", "3",
+            ]
+            if req.low_ram:
+                preflight_cmd.append("--low-ram")
+
+            proc = await asyncio.create_subprocess_exec(
+                *preflight_cmd,
+                stderr=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.DEVNULL,
+                cwd=str(backend_dir),
+            )
+            assert proc.stderr is not None
+            peak_gb = 0.0
+            async for raw_line in proc.stderr:
+                line = raw_line.decode(errors="replace").rstrip()
+                if line.startswith("PREFLIGHT_PEAK_GB:"):
+                    try:
+                        peak_gb = float(line.split(":", 1)[1])
+                    except ValueError:
+                        pass
+            await proc.wait()
+
+        stats = get_memory_stats()
+        available_gb = stats["system_available_gb"]
+        verdict = _proto.preflight_verdict(peak_gb, available_gb)
+        return {"verdict": verdict, "peak_gb": round(peak_gb, 2)}
+
+    finally:
+        _tl.release("training")
+
+
+@app.post("/api/v1/training/runs", response_model=TrainingRunResponse)
+async def create_training_run(req: TrainingRunRequest):
+    """Start a training run asynchronously.
+
+    Creates the run record immediately and launches the supervisor as a
+    background task. Returns run_id and job_id for WebSocket progress tracking.
+
+    Args:
+        req: Dataset id, training hyperparameters.
+
+    Returns:
+        JSON with run_id and job_id.
+    """
+    import datetime
+
+    dataset_id = _safe_dataset_id(req.dataset_id)
+    run_id = str(uuid.uuid4())
+    job_id = str(uuid.uuid4())[:8]
+    created_at = datetime.datetime.utcnow().isoformat() + "Z"
+
+    config_path = str(training_store.run_dir(run_id) / "config.yaml")
+    training_store.create_run(
+        run_id,
+        dataset_id=dataset_id,
+        config_path=config_path,
+        created_at=created_at,
+    )
+    training_store.update_run(run_id, job_id=job_id)
+
+    asyncio.create_task(
+        _training_supervisor(
+            run_id=run_id,
+            job_id=job_id,
+            dataset_id=dataset_id,
+            low_ram=req.low_ram,
+            rank=req.rank,
+            steps=req.steps,
+        )
+    )
+
+    return TrainingRunResponse(run_id=run_id, job_id=job_id)
+
+
+@app.post("/api/v1/training/runs/{run_id}/cancel")
+async def cancel_training_run(run_id: str):
+    """Mark a pending/preprocessing/training run as cancelled.
+
+    Args:
+        run_id: ID of the training run to cancel.
+
+    Returns:
+        JSON with success bool.
+    """
+    run = training_store.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
+    if run.get("status") in ("completed", "failed", "cancelled"):
+        return {"success": False, "message": f"Run is already {run['status']}"}
+    training_store.update_run(run_id, status="cancelled")
+    return {"success": True}
+
+
+@app.get("/api/v1/training/runs")
+async def list_training_runs():
+    """List all training runs, newest first.
+
+    Returns:
+        List of run dicts enriched with disk_bytes.
+    """
+    runs = training_store.list_runs()
+    for r in runs:
+        r["disk_bytes"] = training_store.disk_usage_bytes(r["run_id"])
+    return runs
+
+
+@app.get("/api/v1/training/runs/{run_id}")
+async def get_training_run(run_id: str):
+    """Get a single training run record.
+
+    Args:
+        run_id: Run identifier.
+
+    Returns:
+        Run dict with disk_bytes, or 404.
+    """
+    run = training_store.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
+    run["disk_bytes"] = training_store.disk_usage_bytes(run_id)
+    return run
+
+
+@app.delete("/api/v1/training/runs/{run_id}")
+async def delete_training_run(run_id: str):
+    """Delete a completed or failed training run and its output files.
+
+    Args:
+        run_id: Run to delete.
+
+    Returns:
+        JSON with deleted bool.
+    """
+    run = training_store.get_run(run_id)
+    if run and run.get("status") not in ("completed", "failed", "cancelled"):
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot delete a run that is still in progress",
+        )
+    deleted = training_store.delete_run(run_id)
+    return {"deleted": deleted}
 
 
 # --- Entry point ---

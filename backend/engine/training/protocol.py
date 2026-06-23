@@ -21,9 +21,12 @@ def format_error(msg: str) -> str:
 def parse_line(line: str) -> dict | None:
     line = line.rstrip("\n")
     if line.startswith("STEP:"):
-        _, step, loss, lr, peak = line.split(":", 4)
-        return {"type": "step", "step": int(step), "loss": float(loss),
-                "lr": float(lr), "peak_mem_gb": float(peak)}
+        try:
+            _, step, loss, lr, peak = line.split(":", 4)
+            return {"type": "step", "step": int(step), "loss": float(loss),
+                    "lr": float(lr), "peak_mem_gb": float(peak)}
+        except ValueError:
+            return None
     if line.startswith("SAMPLE:"):
         return {"type": "sample", "path": line[len("SAMPLE:"):]}
     if line.startswith("DONE:"):

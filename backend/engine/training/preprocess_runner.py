@@ -109,7 +109,7 @@ def main() -> int:
         _progress(protocol.format_error(f"{type(exc).__name__}: {exc}"))
         return 1
 
-    _progress("STATUS:Done")
+    _progress(protocol.format_done(args.out))
     return 0
 
 

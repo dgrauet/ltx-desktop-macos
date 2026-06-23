@@ -262,3 +262,31 @@ def test_manifest_rejects_traversal_video(monkeypatch, tmp_path):
         json={"entries": [{"caption": "a cat", "video": "../../etc/passwd"}]},
     )
     assert r.status_code == 400
+
+
+def test_generation_blocked_when_training_lock_held():
+    """POST /generate/text-to-video returns 409 while training lock is held."""
+    from training_lock import training_lock as _tl
+    acquired = _tl.try_acquire("training")
+    assert acquired, "Could not acquire training lock for test"
+    try:
+        r = client.post(
+            "/api/v1/generate/text-to-video",
+            json={"prompt": "a cat", "width": 256, "height": 256, "num_frames": 9},
+        )
+        assert r.status_code == 409
+    finally:
+        _tl.release("training")
+
+
+def test_generation_not_blocked_when_training_lock_released():
+    """After releasing the training lock, the guard no longer blocks (status != 409)."""
+    from training_lock import training_lock as _tl
+    # Make sure lock is free
+    _tl.release("training")
+    r = client.post(
+        "/api/v1/generate/text-to-video",
+        json={"prompt": "a cat", "width": 256, "height": 256, "num_frames": 9},
+    )
+    # Accept any status except 409 — we're only testing the guard, not the full pipeline
+    assert r.status_code != 409
