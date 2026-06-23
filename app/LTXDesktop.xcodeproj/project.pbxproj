@@ -17,6 +17,7 @@
 		549CB28D7CA81B0B6371C5E5 /* DepthExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2890DBD04F245A9D4774FE30 /* DepthExtractor.swift */; };
 		813ADB5575FD0CA88B67A75E /* CoreMLModelManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 150ADC61E3398DAB809A4539 /* CoreMLModelManager.swift */; };
 		833EF0BBD542A5046E698B80 /* TrainingViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BB1B682251B332A4F8DAD48 /* TrainingViewModel.swift */; };
+		9641F12FECAD3DA98C340B49 /* TrainingConfigView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 520C5EA0B05EB0D960C086B7 /* TrainingConfigView.swift */; };
 		A100000001 /* LTXDesktopApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000001 /* LTXDesktopApp.swift */; };
 		A100000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000002 /* ContentView.swift */; };
 		A100000003 /* ProcessManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000003 /* ProcessManager.swift */; };
@@ -57,6 +58,7 @@
 		304C942340DC8FC31DE7C010 /* ControlLibraryView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ControlLibraryView.swift; path = LTXDesktop/Views/ControlLibraryView.swift; sourceTree = "<group>"; };
 		3DAC688BC7819600CE3677B8 /* ControlVideoProcessor.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ControlVideoProcessor.swift; path = LTXDesktop/Services/ControlVideoProcessor.swift; sourceTree = "<group>"; };
 		48E487A9A1D97B3E21F34847 /* DatasetBuilderView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = DatasetBuilderView.swift; path = LTXDesktop/Views/Training/DatasetBuilderView.swift; sourceTree = "<group>"; };
+		520C5EA0B05EB0D960C086B7 /* TrainingConfigView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TrainingConfigView.swift; path = LTXDesktop/Views/Training/TrainingConfigView.swift; sourceTree = "<group>"; };
 		5CB92CDBC4A12635EA276F2C /* TrainingModels.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TrainingModels.swift; path = LTXDesktop/Models/TrainingModels.swift; sourceTree = "<group>"; };
 		7B494FD5C3B778C6F4AA9AC1 /* ControlLibraryItem.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ControlLibraryItem.swift; path = LTXDesktop/Models/ControlLibraryItem.swift; sourceTree = "<group>"; };
 		9BB1B682251B332A4F8DAD48 /* TrainingViewModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TrainingViewModel.swift; path = LTXDesktop/ViewModels/TrainingViewModel.swift; sourceTree = "<group>"; };
@@ -118,6 +120,7 @@
 				5CB92CDBC4A12635EA276F2C /* TrainingModels.swift */,
 				9BB1B682251B332A4F8DAD48 /* TrainingViewModel.swift */,
 				48E487A9A1D97B3E21F34847 /* DatasetBuilderView.swift */,
+				520C5EA0B05EB0D960C086B7 /* TrainingConfigView.swift */,
 			);
 			sourceTree = "<group>";
 		};
@@ -311,6 +314,7 @@
 				531F4C2A502955AC293EA3CB /* TrainingModels.swift in Sources */,
 				833EF0BBD542A5046E698B80 /* TrainingViewModel.swift in Sources */,
 				C220D8C19E34C90E2EBD8320 /* DatasetBuilderView.swift in Sources */,
+				9641F12FECAD3DA98C340B49 /* TrainingConfigView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
