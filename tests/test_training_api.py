@@ -335,3 +335,9 @@ def test_cancel_marks_run_cancelled(monkeypatch, tmp_path):
     got = client.get(f"/api/v1/training/runs/{run_id}")
     assert got.status_code == 200
     assert got.json()["status"] == "cancelled"
+
+
+def test_cancel_unknown_run_returns_404():
+    """Cancel endpoint returns 404 for a run_id that does not exist."""
+    r = client.post("/api/v1/training/runs/does-not-exist-xyzzy/cancel")
+    assert r.status_code == 404
