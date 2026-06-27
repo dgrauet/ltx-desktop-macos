@@ -85,14 +85,28 @@ final class TrainingViewModel: ObservableObject {
             do {
                 try await service.uploadClip(datasetId: datasetId, fileURL: url)
                 let filename = url.lastPathComponent
-                // Only add if not already in the list.
-                if !manifestRows.contains(where: { $0.video == filename }) {
-                    manifestRows.append(ManifestRow(video: filename, caption: ""))
+                // Auto-detect a sidecar caption file (<stem>.txt next to the clip).
+                let caption = Self.sidecarCaption(for: url)
+                if let idx = manifestRows.firstIndex(where: { $0.video == filename }) {
+                    // Fill in a caption if the existing row has none.
+                    if manifestRows[idx].caption.isEmpty { manifestRows[idx].caption = caption }
+                } else {
+                    manifestRows.append(ManifestRow(video: filename, caption: caption))
                 }
             } catch {
                 errorMessage = "Failed to upload \(url.lastPathComponent): \(error.localizedDescription)"
             }
         }
+    }
+
+    /// Reads a sidecar caption file (`<stem>.txt`) next to a dropped clip, if present.
+    /// Returns an empty string when there is no sidecar or it cannot be read.
+    static func sidecarCaption(for clipURL: URL) -> String {
+        let txtURL = clipURL.deletingPathExtension().appendingPathExtension("txt")
+        let scoped = clipURL.startAccessingSecurityScopedResource()
+        defer { if scoped { clipURL.stopAccessingSecurityScopedResource() } }
+        guard let text = try? String(contentsOf: txtURL, encoding: .utf8) else { return "" }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Write the current manifestRows to the backend and store any returned warnings.
