@@ -37,7 +37,7 @@ def test_create_dataset_returns_200(monkeypatch, tmp_path):
     _patch_training_dir(monkeypatch, tmp_path)
     r = client.post("/api/v1/training/datasets", json={"dataset_id": "myds"})
     assert r.status_code == 200
-    assert r.json()["dataset_id"] == "myds"
+    assert r.json()["id"] == "myds"
 
 
 def test_create_dataset_makes_clips_dir(monkeypatch, tmp_path):
@@ -86,7 +86,7 @@ def test_upload_clip_saves_file(monkeypatch, tmp_path):
     )
     assert r.status_code == 200
     data = r.json()
-    assert data["filename"] == "test.mp4"
+    assert data["success"] is True and data["message"] == "test.mp4"
     saved = dataset_store.clips_dir("upload-ds") / "test.mp4"
     assert saved.exists()
     assert saved.read_bytes() == fake_video
@@ -179,7 +179,7 @@ def test_delete_dataset_returns_200(monkeypatch, tmp_path):
     client.post("/api/v1/training/datasets", json={"dataset_id": "del-ds"})
     r = client.delete("/api/v1/training/datasets/del-ds")
     assert r.status_code == 200
-    assert r.json()["deleted"] is True
+    assert r.json()["success"] is True
 
 
 def test_delete_nonexistent_dataset_returns_200_with_false(monkeypatch, tmp_path):
@@ -187,7 +187,7 @@ def test_delete_nonexistent_dataset_returns_200_with_false(monkeypatch, tmp_path
     _patch_training_dir(monkeypatch, tmp_path)
     r = client.delete("/api/v1/training/datasets/ghost-ds")
     assert r.status_code == 200
-    assert r.json()["deleted"] is False
+    assert r.json()["success"] is False
 
 
 def test_delete_removes_from_list(monkeypatch, tmp_path):
@@ -240,7 +240,7 @@ def test_create_dataset_rejects_traversal_id(monkeypatch, tmp_path):
     # A valid id still works.
     r_ok = client.post("/api/v1/training/datasets", json={"dataset_id": "d1"})
     assert r_ok.status_code == 200
-    assert r_ok.json()["dataset_id"] == "d1"
+    assert r_ok.json()["id"] == "d1"
 
 
 def test_delete_dataset_rejects_traversal_id(monkeypatch, tmp_path):

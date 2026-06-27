@@ -1667,7 +1667,7 @@ async def create_training_dataset(req: CreateDatasetRequest):
     """
     dataset_id = _safe_dataset_id(req.dataset_id)
     dataset_store.create_dataset(dataset_id)
-    return {"dataset_id": dataset_id}
+    return {"id": dataset_id, "clip_count": 0, "disk_bytes": 0, "has_precomputed": False}
 
 
 @app.get("/api/v1/training/datasets")
@@ -1710,7 +1710,7 @@ async def upload_training_clip(dataset_id: str, file: UploadFile = File(...)):
     if not dest.resolve().is_relative_to(clips.resolve()):
         raise HTTPException(status_code=400, detail="Invalid filename")
     dest.write_bytes(await file.read())
-    return {"filename": safe_name}
+    return {"success": True, "message": safe_name}
 
 
 @app.put("/api/v1/training/datasets/{dataset_id}/manifest")
@@ -1769,7 +1769,7 @@ async def delete_training_dataset(dataset_id: str):
     """
     dataset_id = _safe_dataset_id(dataset_id)
     deleted = dataset_store.delete_dataset(dataset_id)
-    return {"deleted": deleted}
+    return {"success": deleted, "message": "deleted" if deleted else "dataset not found"}
 
 
 # --- Export endpoints ---
@@ -2217,11 +2217,11 @@ async def cancel_training_run(run_id: str):
         if task is not None:
             task.cancel()
         # The supervisor's CancelledError handler writes status="cancelled".
-        return {"success": True}
+        return {"success": True, "message": "cancelling"}
 
     # No live supervisor (pending or already-finished-but-not-marked) — set directly.
     training_store.update_run(run_id, status="cancelled")
-    return {"success": True}
+    return {"success": True, "message": "cancelled"}
 
 
 @app.get("/api/v1/training/runs")
@@ -2271,7 +2271,7 @@ async def delete_training_run(run_id: str):
             detail="Cannot delete a run that is still in progress",
         )
     deleted = training_store.delete_run(run_id)
-    return {"deleted": deleted}
+    return {"success": deleted, "message": "deleted" if deleted else "run not found"}
 
 
 # --- Entry point ---
