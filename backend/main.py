@@ -1956,9 +1956,9 @@ async def _training_supervisor(
 
         train_cmd = [
             python_bin, "-m", "engine.training.train_runner",
-            "--data-root", data_root,
+            "--data-root", str(precomputed),
             "--model", model_path,
-            "--text-encoder", model_path,
+            "--text-encoder", "mlx-community/gemma-3-12b-it-4bit",  # Gemma (separate from LTX model_path)
             "--output", output_dir,
             "--steps", str(steps),
             "--rank", str(rank),
@@ -2103,9 +2103,9 @@ async def training_preflight(req: TrainingPreflightRequest):
         with tempfile.TemporaryDirectory() as tmp_out:
             preflight_cmd = [
                 python_bin, "-m", "engine.training.train_runner",
-                "--data-root", str(dataset_store.dataset_dir(dataset_id)),
+                "--data-root", str(precomputed),
                 "--model", model_path,
-                "--text-encoder", model_path,
+                "--text-encoder", "mlx-community/gemma-3-12b-it-4bit",  # Gemma (separate from LTX model_path)
                 "--output", tmp_out,
                 "--steps", "3",
                 "--rank", str(req.rank),
