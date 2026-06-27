@@ -319,7 +319,9 @@ class BackendService: ObservableObject {
     // MARK: - Training Runs
 
     func preflight(_ config: TrainingConfigRequest) async throws -> PreflightResult {
-        return try await post("/api/v1/training/preflight", body: config)
+        // First-run preflight preprocesses the whole dataset + probes the model,
+        // which can take several minutes — well beyond the 60s default timeout.
+        return try await post("/api/v1/training/preflight", body: config, timeout: 1800)
     }
 
     func startRun(_ config: TrainingConfigRequest) async throws -> (runId: String, jobId: String) {
@@ -465,11 +467,12 @@ class BackendService: ObservableObject {
         return try decoder.decode(T.self, from: data)
     }
 
-    private func post<B: Encodable, T: Decodable>(_ path: String, body: B) async throws -> T {
+    private func post<B: Encodable, T: Decodable>(_ path: String, body: B, timeout: TimeInterval? = nil) async throws -> T {
         let url = URL(string: "\(baseURL)\(path)")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let timeout { request.timeoutInterval = timeout }
         request.httpBody = try JSONEncoder().encode(body)
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
