@@ -254,15 +254,16 @@ def _resolve_lora_args(lora_ids: list[str]) -> list[str] | None:
         for lid in lora_ids:
             info = all_loras.get(lid)
             if info and info.compatible and info.path:
-                strength = info.strength if info.loaded else 0.7
-                args.append(f"{info.path}:{strength}")
+                # info.strength is the per-LoRA value set from the Generation
+                # panel (persisted in LoRAManager), defaulting to 0.7.
+                args.append(f"{info.path}:{info.strength}")
             else:
                 log.warning("LoRA ID %r not found or incompatible — skipping", lid)
         return args or None
 
-    # No global fallback: lora_ids is authoritative. An empty selection means
-    # "no LoRA for this generation" (the UI auto-selects loaded LoRAs by default,
-    # so a globally-loaded LoRA still applies unless the user unchecks it).
+    # lora_ids is authoritative. An empty selection means "no LoRA for this
+    # generation" — there is no global activation fallback. The Generation panel
+    # is the single place to select and tune LoRAs.
     return None
 
 class HealthResponse(BaseModel):

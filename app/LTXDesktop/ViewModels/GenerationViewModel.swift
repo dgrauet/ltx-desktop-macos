@@ -537,6 +537,19 @@ class GenerationViewModel: ObservableObject {
         Array(selectedLoRAIds)
     }
 
+    /// Update a LoRA's application strength (persisted backend-side, applied at
+    /// generation time). Updates local state immediately for responsive UI.
+    func updateLoRAStrength(_ loraId: String, strength: Double, service: BackendService) async {
+        if let idx = availableLoRAs.firstIndex(where: { $0.id == loraId }) {
+            availableLoRAs[idx].strength = strength
+        }
+        do {
+            _ = try await service.updateLoRAStrength(loraId: loraId, strength: strength)
+        } catch {
+            // Best-effort — local value still drives the next generation request.
+        }
+    }
+
     /// Whether RAM is below 32GB (show red warning banner).
     var isLowRAM: Bool {
         guard let limits = hardwareLimits else { return false }

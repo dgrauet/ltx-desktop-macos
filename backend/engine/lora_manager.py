@@ -337,6 +337,10 @@ class LoRAManager:
         """
         self._model_manager = model_manager
         self._loaded_loras: dict[str, LoadedLoRA] = {}
+        # Per-LoRA application strength, persisted independently of the legacy
+        # "loaded" flag. The Generation panel selects LoRAs per-generation and
+        # sets their strength here; there is no separate global activation step.
+        self._strengths: dict[str, float] = {}
 
     # ------------------------------------------------------------------
     # Public API
@@ -369,7 +373,9 @@ class LoRAManager:
                     compatible=compatible,
                     loaded=loaded,
                     size_mb=round(size_mb, 2),
-                    strength=loaded_lora.strength if loaded_lora else 0.7,
+                    strength=self._strengths.get(
+                        stem, loaded_lora.strength if loaded_lora else 0.7
+                    ),
                 )
             )
             log.debug("Scanned LoRA: %s (type=%s, compatible=%s)", stem, lora_type, compatible)
@@ -467,18 +473,22 @@ class LoRAManager:
         return args
 
     def update_strength(self, lora_id: str, strength: float) -> None:
-        """Update the strength of an active LoRA.
+        """Persist a LoRA's application strength.
+
+        Strength is stored per LoRA independently of the legacy "loaded" flag,
+        so the Generation panel can set it whether or not the LoRA was ever
+        activated through the old load endpoint. Resolved at generation time by
+        ``_resolve_lora_args`` via ``LoRAInfo.strength``.
 
         Args:
             lora_id: Slug of the LoRA.
             strength: New strength value (0.0-1.0).
         """
+        self._strengths[lora_id] = strength
         if lora_id in self._loaded_loras:
             self._loaded_loras[lora_id].strength = strength
             self._loaded_loras[lora_id].info.strength = strength
-            log.info("LoRA %s strength updated to %.2f", lora_id, strength)
-        else:
-            log.warning("update_strength called for non-loaded LoRA: %s", lora_id)
+        log.info("LoRA %s strength set to %.2f", lora_id, strength)
 
     def import_lora(self, source_path: str) -> LoRAInfo:
         """Copy a .safetensors file into the LoRA directory.

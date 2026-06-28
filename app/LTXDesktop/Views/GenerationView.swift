@@ -759,23 +759,50 @@ struct GenerationView: View {
                 }
                 .padding(.vertical, 4)
             } else {
-                VStack(spacing: 6) {
+                VStack(spacing: 8) {
                     ForEach(vm.availableLoRAs) { lora in
-                        HStack(spacing: 8) {
+                        let isSelected = vm.selectedLoRAIds.contains(lora.id)
+                        VStack(alignment: .leading, spacing: 4) {
                             Toggle(isOn: Binding<Bool>(
-                                get: { vm.selectedLoRAIds.contains(lora.id) },
+                                get: { isSelected },
                                 set: { _ in vm.toggleLoRASelection(lora.id) }
                             )) {
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(lora.name)
-                                        .font(.caption)
-                                        .lineLimit(1)
-                                    Text(String(format: "%.0f%%", lora.strength * 100))
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                }
+                                Text(lora.name)
+                                    .font(.caption)
+                                    .lineLimit(1)
                             }
                             .toggleStyle(.checkbox)
+
+                            // Strength is set here — the Generation panel is the
+                            // single place to activate and tune a LoRA.
+                            if isSelected {
+                                HStack(spacing: 6) {
+                                    Text("Strength")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                    Slider(
+                                        value: Binding<Double>(
+                                            get: { lora.strength },
+                                            set: { newValue in
+                                                Task {
+                                                    await vm.updateLoRAStrength(
+                                                        lora.id,
+                                                        strength: newValue,
+                                                        service: backendService
+                                                    )
+                                                }
+                                            }
+                                        ),
+                                        in: 0.0...1.0,
+                                        step: 0.05
+                                    )
+                                    Text(String(format: "%.2f", lora.strength))
+                                        .font(.caption2.monospacedDigit())
+                                        .foregroundStyle(.secondary)
+                                        .frame(width: 30, alignment: .trailing)
+                                }
+                                .padding(.leading, 18)
+                            }
                         }
                     }
                 }

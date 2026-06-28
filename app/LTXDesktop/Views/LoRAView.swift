@@ -61,7 +61,7 @@ struct LoRAView: View {
                 Image(systemName: "info.circle")
                     .foregroundStyle(.secondary)
                     .font(.caption)
-                Text("LoRAs must be compatible with LTX-2.3 latent space. Place .safetensors files in ~/.ltx-desktop/loras/")
+                Text("Your LoRA library. Select and set strength per generation in the Generation panel. Place .safetensors files in ~/.ltx-desktop/loras/ (must be LTX-2.3 compatible).")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -165,62 +165,10 @@ struct LoRAView: View {
                             .foregroundStyle(.orange)
                     }
                 }
-
-                // Toggle
-                Toggle("", isOn: Binding<Bool>(
-                    get: { lora.loaded },
-                    set: { _ in
-                        Task { await vm.toggleLoRA(lora, using: backendService) }
-                    }
-                ))
-                .toggleStyle(.switch)
-                .labelsHidden()
-                .disabled(!lora.compatible)
-            }
-
-            // Strength slider (shown when loaded)
-            if lora.loaded {
-                HStack(spacing: 8) {
-                    Text("Strength")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 56, alignment: .leading)
-
-                    Slider(
-                        value: strengthBinding(for: lora),
-                        in: 0.0...1.0,
-                        step: 0.05
-                    )
-
-                    Text(String(format: "%.2f", lora.strength))
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .frame(width: 36, alignment: .trailing)
-                }
-                .padding(.leading, 48)
-                .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
-        .animation(.easeInOut(duration: 0.2), value: lora.loaded)
-    }
-
-    /// Create a binding that updates strength locally and sends to backend on change.
-    private func strengthBinding(for lora: LoRAInfo) -> Binding<Double> {
-        Binding<Double>(
-            get: { lora.strength },
-            set: { newValue in
-                // Update local state immediately
-                if let idx = vm.loras.firstIndex(where: { $0.id == lora.id }) {
-                    vm.loras[idx].strength = newValue
-                }
-                // Debounce: send to backend
-                Task {
-                    await vm.updateStrength(lora, strength: newValue, using: backendService)
-                }
-            }
-        )
     }
 
     // MARK: - Empty State
