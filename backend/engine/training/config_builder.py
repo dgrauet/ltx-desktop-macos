@@ -31,6 +31,7 @@ def build_t2v_config(
     seed: int = 42,
     video_dims: tuple[int, int, int] = (704, 480, 25),
     low_ram: bool = False,
+    enable_validation: bool = False,
 ) -> LtxTrainerConfig:
     """Construct a T2V LtxTrainerConfig with optional 32GB-safe overrides.
 
@@ -46,6 +47,14 @@ def build_t2v_config(
     low_ram=False (default, normal training):
     - batch_size = 2
     - enable_gradient_checkpointing = False
+
+    enable_validation=False (default): validation is fully disabled
+    (interval=0, no prompts). The initial step-0 validation is a ~2-min
+    sustained-Metal inference that reliably trips the macOS GPU watchdog
+    ("Impacting Interactivity" SIGKILL) and keeps the VAE decoder resident,
+    raising peak memory for the first training step. Samples are a UI
+    placeholder we do not consume, so off-by-default is the safe choice on
+    32GB. Set enable_validation=True to generate periodic preview samples.
 
     Args:
         model_path: Path to the transformer weights directory.
@@ -95,7 +104,18 @@ def build_t2v_config(
             preprocessed_data_root=preprocessed_data_root,
         ),
         validation=ValidationConfig(
-            prompts=["a serene landscape, cinematic"],
+            # Disable validation fully when enable_validation is False:
+            #  - empty prompts -> has_validation False, so the trainer never loads
+            #    the text encoder, feature extractor, or VAE decoder (it gates them
+            #    on `interval and prompts`), lowering peak memory;
+            #  - skip_initial_validation removes the step-0 inference (the
+            #    sustained-Metal burst that trips the macOS GPU watchdog);
+            #  - a huge interval guarantees the periodic block (gated on interval
+            #    only) never fires. interval must be > 0 (pydantic constraint), so
+            #    0 is not an option.
+            prompts=["a serene landscape, cinematic"] if enable_validation else [],
+            interval=100 if enable_validation else 1_000_000_000,
+            skip_initial_validation=not enable_validation,
             video_dims=video_dims,
             inference_steps=8,
             generate_audio=False,

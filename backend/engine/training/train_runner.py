@@ -111,10 +111,32 @@ def main() -> int:  # noqa: PLR0911  (multiple return paths are intentional)
             "Recommended for quantized models or machines with ≤32GB RAM."
         ),
     )
+    ap.add_argument(
+        "--validate",
+        action="store_true",
+        help=(
+            "Generate periodic validation preview samples. Off by default: the "
+            "step-0 validation is a sustained-Metal inference that trips the macOS "
+            "GPU watchdog (SIGKILL) and raises peak memory. Samples are unused by "
+            "the UI, so leave off unless you specifically want previews."
+        ),
+    )
     args = ap.parse_args()
 
     # Heavy imports kept inside main() so --help exits fast.
+    import os  # noqa: PLC0415
+
     import mlx.core as mx  # noqa: PLC0415
+
+    # Cap the MLX buffer-reuse cache. MLX hoards freed Metal buffers for reuse;
+    # during training the cache can balloon (~18GB observed on 32GB), pushing the
+    # memory compressor to exhaustion and triggering a jetsam OOM SIGKILL on the
+    # first step. A small cache forces buffers back to the OS. Env-tunable;
+    # default 1GB. Set LTX_MLX_CACHE_LIMIT_GB=0 to disable the cap.
+    _cache_gb = float(os.environ.get("LTX_MLX_CACHE_LIMIT_GB", "1"))
+    if _cache_gb > 0:
+        mx.set_cache_limit(int(_cache_gb * 1024**3))
+
     from ltx_trainer_mlx.trainer import LtxvTrainer  # noqa: PLC0415
 
     from engine.training import protocol  # noqa: PLC0415
@@ -132,6 +154,7 @@ def main() -> int:  # noqa: PLR0911  (multiple return paths are intentional)
         seed=args.seed,
         video_dims=(704, 480, 25),
         low_ram=args.low_ram,
+        enable_validation=args.validate,
     )
 
     def step_callback(current_step: int, total_steps: int, sampled_video_paths: list[Path]) -> None:
