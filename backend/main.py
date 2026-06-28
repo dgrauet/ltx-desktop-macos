@@ -260,12 +260,10 @@ def _resolve_lora_args(lora_ids: list[str]) -> list[str] | None:
                 log.warning("LoRA ID %r not found or incompatible — skipping", lid)
         return args or None
 
-    # Fall back to globally active LoRAs — extract path:strength from CLI args
-    active = lora_manager.get_active_lora_args()
-    if not active:
-        return None
-    # get_active_lora_args returns ["--lora", "path:str", "--lora", ...] — extract values
-    return [active[i] for i in range(1, len(active), 2)] or None
+    # No global fallback: lora_ids is authoritative. An empty selection means
+    # "no LoRA for this generation" (the UI auto-selects loaded LoRAs by default,
+    # so a globally-loaded LoRA still applies unless the user unchecks it).
+    return None
 
 class HealthResponse(BaseModel):
     """Health check response."""

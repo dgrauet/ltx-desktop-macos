@@ -86,6 +86,7 @@ class GenerationViewModel: ObservableObject {
     // LoRA selection
     @Published var availableLoRAs: [LoRAInfo] = []
     @Published var selectedLoRAIds: Set<String> = []
+    private var didInitLoRASelection = false
 
     // Presets
     @Published var presets: [GenerationPreset] = []
@@ -507,8 +508,16 @@ class GenerationViewModel: ObservableObject {
         do {
             let loras = try await service.listLoRAs()
             availableLoRAs = loras.filter { $0.compatible }
-            // Auto-select LoRAs that are currently loaded in the backend
-            selectedLoRAIds = Set(loras.filter { $0.loaded }.map { $0.id })
+            let availableIds = Set(availableLoRAs.map { $0.id })
+            if !didInitLoRASelection {
+                // First fetch: default-select LoRAs already loaded in the backend.
+                selectedLoRAIds = Set(loras.filter { $0.loaded }.map { $0.id })
+                didInitLoRASelection = true
+            } else {
+                // Preserve the user's per-generation selection; only drop ids that
+                // no longer exist (a previously-selected LoRA was deleted).
+                selectedLoRAIds = selectedLoRAIds.intersection(availableIds)
+            }
         } catch {
             // Silently fail — LoRA fetching is best-effort
         }
