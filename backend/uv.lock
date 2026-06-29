@@ -218,8 +218,8 @@ wheels = [
 
 [[package]]
 name = "ltx-core-mlx"
-version = "0.14.13"
-source = { git = "https://github.com/dgrauet/ltx-2-mlx?subdirectory=packages%2Fltx-core-mlx&rev=main#3f5897a9582b5c14379c8f88216ae0fd6e55741d" }
+version = "0.14.14"
+source = { git = "https://github.com/dgrauet/ltx-2-mlx?subdirectory=packages%2Fltx-core-mlx&rev=main#6aa09157b48b0c5d754033c80cbe7a544277f46a" }
 dependencies = [
     { name = "huggingface-hub", marker = "sys_platform == 'darwin'" },
     { name = "mlx", marker = "sys_platform == 'darwin'" },
@@ -287,8 +287,8 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "ltx-pipelines-mlx"
-version = "0.14.13"
-source = { git = "https://github.com/dgrauet/ltx-2-mlx?subdirectory=packages%2Fltx-pipelines-mlx&rev=main#3f5897a9582b5c14379c8f88216ae0fd6e55741d" }
+version = "0.14.14"
+source = { git = "https://github.com/dgrauet/ltx-2-mlx?subdirectory=packages%2Fltx-pipelines-mlx&rev=main#6aa09157b48b0c5d754033c80cbe7a544277f46a" }
 dependencies = [
     { name = "ltx-core-mlx", marker = "sys_platform == 'darwin'" },
     { name = "mlx-arsenal", marker = "sys_platform == 'darwin'" },
@@ -298,8 +298,8 @@ dependencies = [
 
 [[package]]
 name = "ltx-trainer-mlx"
-version = "0.14.13"
-source = { git = "https://github.com/dgrauet/ltx-2-mlx?subdirectory=packages%2Fltx-trainer&rev=main#3f5897a9582b5c14379c8f88216ae0fd6e55741d" }
+version = "0.14.14"
+source = { git = "https://github.com/dgrauet/ltx-2-mlx?subdirectory=packages%2Fltx-trainer&rev=main#6aa09157b48b0c5d754033c80cbe7a544277f46a" }
 dependencies = [
     { name = "ltx-core-mlx", marker = "sys_platform == 'darwin'" },
     { name = "ltx-pipelines-mlx", marker = "sys_platform == 'darwin'" },
