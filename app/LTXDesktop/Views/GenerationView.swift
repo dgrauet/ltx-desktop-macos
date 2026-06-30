@@ -115,6 +115,43 @@ struct GenerationView: View {
                         RoundedRectangle(cornerRadius: 8)
                             .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
                     )
+                    // Word count + Enhance floated in the bottom-right of the field
+                    .overlay(alignment: .bottomTrailing) {
+                        HStack(spacing: 6) {
+                            let wordCount = vm.prompt.split(separator: " ").count
+                            Text("\(wordCount) words")
+                                .font(.caption2)
+                                .foregroundStyle(
+                                    wordCount > 200 ? .red :
+                                    wordCount > 150 ? .orange :
+                                    Color.secondary
+                                )
+
+                            if enhanceEnabled {
+                                Button(action: {
+                                    Task { await vm.enhancePrompt(using: backendService) }
+                                }) {
+                                    HStack(spacing: 4) {
+                                        if vm.isEnhancing {
+                                            ProgressView()
+                                                .scaleEffect(0.6)
+                                        } else {
+                                            Image(systemName: "sparkles")
+                                        }
+                                        Text(vm.isEnhancing ? "Enhancing..." : "Enhance")
+                                    }
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                                .disabled(vm.prompt.isEmpty || vm.isEnhancing || vm.isGenerating)
+                                .keyboardShortcut("e", modifiers: .command)
+                            }
+                        }
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 4)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .padding(6)
+                    }
 
                 // I2V hint
                 if vm.sourceImagePath != nil {
@@ -122,39 +159,6 @@ struct GenerationView: View {
                         .font(.caption)
                         .foregroundStyle(.orange)
                         .padding(.horizontal, 4)
-                }
-
-                // Word count + Enhance button
-                HStack(alignment: .center) {
-                    Spacer()
-                    let wordCount = vm.prompt.split(separator: " ").count
-                    Text("\(wordCount) words")
-                        .font(.caption)
-                        .foregroundStyle(
-                            wordCount > 200 ? .red :
-                            wordCount > 150 ? .orange :
-                            Color.secondary
-                        )
-
-                    if enhanceEnabled {
-                        Button(action: {
-                            Task { await vm.enhancePrompt(using: backendService) }
-                        }) {
-                            HStack(spacing: 4) {
-                                if vm.isEnhancing {
-                                    ProgressView()
-                                        .scaleEffect(0.6)
-                                } else {
-                                    Image(systemName: "sparkles")
-                                }
-                                Text(vm.isEnhancing ? "Enhancing..." : "Enhance")
-                            }
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .disabled(vm.prompt.isEmpty || vm.isEnhancing || vm.isGenerating)
-                        .keyboardShortcut("e", modifiers: .command)
-                    }
                 }
 
                 // Resolution
