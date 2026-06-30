@@ -93,11 +93,11 @@ struct GenerationView: View {
                 // Preset bar
                 presetBar
 
-                // Image drop zone for I2V
-                imageDropZone
-
-                // Audio drop zone for A2V (beta)
-                audioDropZone
+                // Image (I2V) + Audio (A2V, beta) drop zones side by side
+                HStack(alignment: .top, spacing: 12) {
+                    imageDropZone
+                    audioDropZone
+                }
 
                 // Control-video drop zone for IC-LoRA
                 controlVideoDropZone
