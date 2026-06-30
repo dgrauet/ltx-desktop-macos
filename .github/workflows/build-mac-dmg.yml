@@ -4,6 +4,11 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to (re)build and upload the DMG for (e.g. v0.2.0). Leave empty to just build an artifact."
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -14,8 +19,26 @@ jobs:
     runs-on: macos-latest
 
     steps:
+      - name: Resolve release tag
+        id: rel
+        env:
+          REL_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          TAG="${REL_TAG:-${INPUT_TAG:-}}"
+          if [[ -n "$TAG" && ! "$TAG" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([.-].*)?$ ]]; then
+            echo "Refusing invalid tag format: $TAG" >&2
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          # For a release event or a dispatch with a tag, build that exact tag.
+          # Empty (plain dispatch) -> default ref. The tag is format-validated above.
+          ref: ${{ steps.rel.outputs.tag }}
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v5
@@ -73,13 +96,18 @@ jobs:
           MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY || '-' }}
 
       - name: Create DMG from signed app
-        run: bash scripts/create-dmg.sh "${{ steps.build-app.outputs.app_path }}"
+        env:
+          DMG_VERSION: ${{ steps.rel.outputs.version }}
+        # DMG_VERSION (the release tag, authoritative) names the DMG; empty falls
+        # back to the app's CFBundleShortVersionString inside create-dmg.sh.
+        run: bash scripts/create-dmg.sh "${{ steps.build-app.outputs.app_path }}" "$DMG_VERSION"
 
       - name: Upload DMG to GitHub Release
-        if: github.event_name == 'release'
+        if: steps.rel.outputs.tag != ''
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${{ github.event.release.tag_name }}" release/*.dmg --clobber
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.rel.outputs.tag }}
+        run: gh release upload "$TAG" release/*.dmg --clobber
 
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v4
