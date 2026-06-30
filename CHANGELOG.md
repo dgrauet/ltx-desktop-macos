@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1](https://github.com/dgrauet/ltx-desktop-macos/compare/v0.2.0...v0.2.1) (2026-06-30)
+
+
+### Bug Fixes
+
+* **ci:** name the DMG from the release tag, drop silent 0.1.0 fallback ([69eabf1](https://github.com/dgrauet/ltx-desktop-macos/commit/69eabf1c54e9ddfd6c642eb5a5329fc4b212c52c))
+
 ## [0.2.0](https://github.com/dgrauet/ltx-desktop-macos/compare/v0.1.0...v0.2.0) (2026-06-30)
 
 
