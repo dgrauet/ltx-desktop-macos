@@ -17,11 +17,20 @@ python-deps-hash.txt
 backend/requirements-dist.txt
 release/
 
-# Models (large files, downloaded separately)
-models/*.safetensors
+# Model / LoRA weights (large — never commit; they live in ~/.ltx-desktop or are
+# downloaded separately). Applies anywhere in the tree, not just models/.
+*.safetensors
+*.gguf
+*.ckpt
+*.mlx
+*.pt
+*.pth
 models/*.bin
-models/*.gguf
-models/*.mlx
+
+# LoRA library / training data if ever copied into the repo
+**/loras/
+**/datasets/
+**/.precomputed/
 
 # Xcode
 app/LTXDesktop.xcodeproj/project.xcworkspace/xcuserdata/
