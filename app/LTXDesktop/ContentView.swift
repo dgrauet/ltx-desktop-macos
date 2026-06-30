@@ -61,6 +61,7 @@ struct ContentView: View {
                         case .training:
                             ScrollView {
                                 VStack(spacing: 0) {
+                                    trainingBetaBanner
                                     DatasetBuilderView()
                                     Divider()
                                     TrainingConfigView()
@@ -97,6 +98,26 @@ struct ContentView: View {
         .environmentObject(trainingVM)
     }
 
+    private var trainingBetaBanner: some View {
+        HStack(spacing: 8) {
+            Text("BETA")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Color.purple)
+                .clipShape(Capsule())
+            Text("LoRA training is in beta and under active testing — results and stability may vary.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.purple.opacity(0.12))
+    }
+
     private func sidebarButton(_ tab: Tab) -> some View {
         Button {
             selectedTab = tab
@@ -113,6 +134,16 @@ struct ContentView: View {
                         .padding(.vertical, 2)
                         .background(queueVM.runningCount > 0 ? Color.green : Color.orange)
                         .clipShape(Capsule())
+                }
+                if tab == .training {
+                    Text("BETA")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Color.purple)
+                        .clipShape(Capsule())
+                        .help("Training is in beta — still under testing")
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
