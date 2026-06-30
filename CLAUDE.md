@@ -69,7 +69,7 @@ FastAPI in separate process for: crash isolation (OOM kills backend, not UI), GI
 - ✅ Backend `low_ram` option (block streaming, ~75% less transformer RAM — q8 on 16GB)
 - ✅ IC-LoRA control (depth/pose/edges) — control-video conditioning via `ICLoraPipeline`; in-app canny extraction; Union-Control LoRA downloadable. canny on backend; pose (Vision) + depth (Core ML, on-demand model) extracted on-device in Swift for Union-Control. Extracted control videos are saved to a reusable library (~/.ltx-desktop/control-videos/) with a dedicated tab + reuse sheet.
 
-**DONE (J4b P1 — LoRA training, 2026-06-23, ltx-2-mlx 0.14.13):**
+**DONE (J4b P1 — LoRA training, 2026-06-23, ltx-2-mlx 0.14.14):**
 - ✅ **T2V LoRA training end-to-end** (AV and V2V training deferred to P3/P4). Proven feasible on 32GB (P0 spike: q4 base, RSS peak ~7 GB, 20 steps / rank-32 completed without OOM).
 - ✅ **Training tab** — 3-panel UI: Dataset Builder (drag clips, add captions, save manifest), Training Config (rank, steps, low-RAM toggle, preflight), Progress (live step counter + log stream via WebSocket).
 - ✅ **Dataset CRUD + preprocess** — backend stores manifests in `~/.ltx-desktop/datasets/`; preprocess runner calls `ltx_trainer_mlx.preprocess.preprocess_dataset()` and caches `.precomputed/` alongside the videos dir.
@@ -79,7 +79,7 @@ FastAPI in separate process for: crash isolation (OOM kills backend, not UI), GI
 - ✅ **Generation ↔ training exclusion lock** — a `threading.Lock`-guarded `ExclusionLock` (named holder) prevents concurrent GPU use: `/api/v1/generate/*` returns 409 while a training run is active, and vice versa.
 - ✅ **LoRA auto-import** — on run completion the produced `lora_weights_step_NNNNN.safetensors` is imported into `LoRAManager` and appears immediately in the Generation LoRA picker.
 - ✅ **Per-step loss display is a 0.0 placeholder** — `StepCallback = Callable[[int,int,list[Path]], None]` provides step index and sample paths but no loss value. A real loss curve requires an upstream `ltx-2-mlx` step-loss callback (tracked as P2 lib dep).
-- ✅ **Dependency bumped to ltx-2-mlx 0.14.13** (commit 89dd935 fixes fps→frame_rate ×3, decoder()→.decode(), bf16→f32 PEP3118 bugs found during P0 spike).
+- ✅ **Dependency: ltx-2-mlx 0.14.14** (0.14.13 commit 89dd935 fixed fps→frame_rate ×3, decoder()→.decode(), bf16→f32 PEP3118 during the P0 spike; **0.14.14 commit 6aa09157 fixes LoRA application in `low_ram_streaming`** — without it, LoRAs were silently dropped in Low-RAM mode).
 - ✅ **UI "close other GPU apps" hint** displayed in the Training Config panel — macOS GPU watchdog can SIGKILL sustained Metal work when another GPU/display client holds the GPU.
 - ⚠️ **`mx.get_peak_memory()` NOT surfaced as "RAM needed"** during training — reports ~49.7 GB on a 32GB machine (MLX high-water accounting artifact); actual RSS ~7 GB. Use RSS or system available instead.
 
