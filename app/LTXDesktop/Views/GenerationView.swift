@@ -328,9 +328,10 @@ struct GenerationView: View {
                         TextField("Default (blurry, distorted, artifacts…)", text: $vm.negativePrompt, axis: .vertical)
                             .lineLimit(1...3)
                             .textFieldStyle(.roundedBorder)
-                        Text("What to steer away from. Leave empty for the model's default.")
+                        Text("Replaces the model's default negative (which suppresses blur, borders and artifacts) — include those terms too if you still want them. Leave empty to keep the default.")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
 
