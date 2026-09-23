@@ -18,8 +18,8 @@ Every pipeline function must call `aggressive_cleanup()` between stages:
 ```python
 def aggressive_cleanup():
     gc.collect()
-    mx.metal.clear_cache()
-    mx.eval(mx.zeros(1))  # Barrier
+    mx.clear_cache()
+    mx.synchronize()  # Barrier
 ```
 
 Required cleanup points:

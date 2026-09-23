@@ -14,14 +14,14 @@ Native macOS app replicating **LTX Desktop** (Lightricks) with **100% local infe
 - **Tested resolutions**: up to 1280×704 on 32GB. 1920×1080 selectable in UI but untested on 32GB (likely OOMs)
 - **FPS**: 24 (distilled model)
 - **Audio**: built-in vocoder, synchronized generation (output noisy — quality issue)
-- **Variants**: dev (CFG, 30 steps) and distilled (8+3 steps) — both supported by ltx-pipelines-mlx ≥0.14. MLX repos ship both transformers: `dgrauet/ltx-2.3-mlx` (bf16 ~42GB), `-q8` (~21GB), `-q4` (~12GB).
+- **Variants**: dev (CFG, 30 steps) and distilled (8+3 steps) — both supported by ltx-pipelines-mlx ≥0.14 (app pinned to 0.15.9). MLX repos ship both transformers: `dgrauet/ltx-2.3-mlx` (bf16 ~42GB), `-q8` (~21GB), `-q4` (~12GB).
 - **Text encoder**: Gemma 3 12B (for video generation AND prompt enhancement via ltx-core-mlx)
 - **VAE**: rebuilt for 2.3, better texture preservation
 - **HuggingFace**: `Lightricks/LTX-2.3`, pre-converted MLX: `dgrauet/ltx-2.3-mlx-q8`
 
 ### MLX on Apple Silicon
 - Unified CPU/GPU memory — no data copying
-- Key packages: `mlx`, `ltx-core-mlx`, `ltx-pipelines-mlx` (both ≥0.14, from the [ltx-2-mlx](https://github.com/dgrauet/ltx-2-mlx) monorepo), `mlx-audio`
+- Key packages: `mlx`, `ltx-core-mlx`, `ltx-pipelines-mlx`, `ltx-trainer-mlx` (all pinned to tag `v0.15.9` of the [ltx-2-mlx](https://github.com/dgrauet/ltx-2-mlx) monorepo); `mlx>=0.32.2`
 - Weight conversion: PyTorch → MLX via [mlx-forge](https://github.com/dgrauet/mlx-forge) (`mlx-forge convert ltx-2.3`)
 - Quantization: int4, int8 support
 
@@ -30,7 +30,7 @@ Native macOS app replicating **LTX Desktop** (Lightricks) with **100% local infe
 ## Application Architecture
 
 ```
-SwiftUI → HTTP/WS :8000 → FastAPI → MLX Engine + ffmpeg + MLX-Audio → Apple Silicon Metal
+SwiftUI → HTTP/WS :8000 → FastAPI → MLX Engine (ltx-2-mlx, audio vocoder included) + ffmpeg → Apple Silicon Metal
 Single subprocess: ltx-pipelines-mlx handles text encoder staging via low_memory=True
 ```
 
@@ -83,8 +83,12 @@ FastAPI in separate process for: crash isolation (OOM kills backend, not UI), GI
 - ✅ **UI "close other GPU apps" hint** displayed in the Training Config panel — macOS GPU watchdog can SIGKILL sustained Metal work when another GPU/display client holds the GPU.
 - ⚠️ **`mx.get_peak_memory()` NOT surfaced as "RAM needed"** during training — reports ~49.7 GB on a 32GB machine (MLX high-water accounting artifact); actual RSS ~7 GB. Use RSS or system available instead.
 
+**DONE (migration ltx-2-mlx 0.15.9 + mlx 0.32.2, 2026-09-23):**
+- ✅ Deps pinned to tag `v0.15.9` (was `@main`). Fixes retake/extend `TypeError` (0.14.14 `RetakePipeline` rejected `low_ram_streaming`); extend now honours the selected model. `tests/test_pipeline_ctor_kwargs.py` binds every pipeline constructor's kwargs to the real lib signatures.
+- Lib 0.15 unlocks: per-step `on_step` / `StepwisePreview` (progressive preview), `[estimate]` ETA lines, LTX-2.5 packs (auto-detected, Gemma-4 TE embedded), `generate_audio=False`, Prompt Relay. Still missing upstream: custom `negative_prompt`, trainer step-loss callback.
+
 **REMAINING:**
-- **Progressive diffusion display** — consumer plumbing (mlx_runner → VM → View) exists but the subprocess **never emits `PREVIEW:`**; the lib's sampler has no per-step callback, so this is **blocked on `ltx-2-mlx`** (add a step callback to `utils/samplers.py`)
+- **Progressive diffusion display** — consumer plumbing (mlx_runner → VM → View) exists but the subprocess **never emits `PREVIEW:`**. **Unblocked** by lib 0.14.21+ `StepwisePreview` / `on_step` — wiring pending
 - **Negative prompt** — lib hardcodes `DEFAULT_NEGATIVE_PROMPT`; public `generate_and_save` accepts no custom negative. **Blocked on `ltx-2-mlx`** (add a `negative_prompt` arg)
 - **2× pixel upscale (ffmpeg lanczos)** — not implemented in backend (no lanczos/scale filter or endpoint). Note: the lib's two-stage pipeline has a *neural* upscaler, which is different
 - Generation performance (~8min for 97f@768×512) — mx.compile disabled (see Performance section); TeaCache available in lib (`enable_teacache`, ~1.5× on Euler) but not yet exposed
@@ -260,7 +264,7 @@ Example:
 ## Key Resources
 
 - **LTX-2.3**: [Blog](https://ltx.io/model/model-blog/ltx-2-3-release) · [GitHub](https://github.com/Lightricks/LTX-2) · [HuggingFace](https://huggingface.co/Lightricks/LTX-2.3) · [Prompting](https://ltx.video/blog/how-to-prompt-for-ltx-2)
-- **MLX**: [GitHub](https://github.com/ml-explore/mlx) · [Docs](https://ml-explore.github.io/mlx/) · [mlx-lm](https://github.com/ml-explore/mlx-lm) · [mlx-audio](https://github.com/Blaizzy/mlx-audio)
+- **MLX**: [GitHub](https://github.com/ml-explore/mlx) · [Docs](https://ml-explore.github.io/mlx/) · [mlx-lm](https://github.com/ml-explore/mlx-lm)
 - **Models**: [MLX LTX-2.3](https://huggingface.co/dgrauet/ltx-2.3-mlx-q8)
 - **LTX Desktop (reference)**: [GitHub](https://github.com/Lightricks/ltx-desktop)
 
