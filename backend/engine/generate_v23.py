@@ -20,33 +20,36 @@ from engine.memory_manager import aggressive_cleanup, get_memory_stats
 # ---------------------------------------------------------------------------
 
 _current_stage = 1
+# True once the first denoise loop has opened. Stages advance when the *next*
+# loop opens: samplers may ``break`` out of their last step (the 2.5 ancestral
+# sampler does), so code after the generator's ``for`` is not guaranteed to run.
+_denoise_loop_started = False
 
 
 class _ProgressTqdm:
     """Drop-in tqdm replacement that emits STAGE:STEP lines on stderr."""
 
     def __init__(self, iterable=None, *, desc="", total=None, disable=False, **kwargs):
-        global _current_stage
+        global _current_stage, _denoise_loop_started
         self._iterable = iterable
         self._items = list(iterable) if iterable is not None else []
         self._total = total or len(self._items)
         self._desc = desc or ""
         self._disable = disable
         self._step = 0
-        # Emit a STATUS for each new denoising loop
+        # Each new denoising loop opens the next stage and emits a STATUS
         if not disable and "denois" in self._desc.lower():
+            if _denoise_loop_started:
+                _current_stage += 1
+            _denoise_loop_started = True
             _progress(f"STATUS:Denoising stage {_current_stage} ({self._total} steps)")
 
     def __iter__(self):
-        global _current_stage
         for item in self._items:
             self._step += 1
             if not self._disable:
                 _progress(f"STAGE:{_current_stage}:STEP:{self._step}:{self._total}")
             yield item
-        # After completing a denoising loop, advance stage for next loop
-        if not self._disable and "denois" in self._desc.lower():
-            _current_stage += 1
 
     def __enter__(self):
         return self
