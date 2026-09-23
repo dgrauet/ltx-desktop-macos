@@ -79,6 +79,19 @@ class GenerationViewModel: ObservableObject {
     @Published var segments: [String] = []
     @Published var generateAudio = true
     @Published var enableTeacache = false
+    /// Empty = the model's default negative prompt.
+    @Published var negativePrompt = ""
+
+    /// Negative prompts only affect CFG pipelines (dev pipelines and A2V), not distilled.
+    var negativePromptApplies: Bool {
+        controlVideoPath == nil && (sourceAudioPath != nil || pipelineType != "distilled")
+    }
+
+    /// Value sent to the backend: nil keeps the model default.
+    var effectiveNegativePrompt: String? {
+        let trimmed = negativePrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        return negativePromptApplies && !trimmed.isEmpty ? trimmed : nil
+    }
 
     /// TeaCache only exists for the LTX-2.3 two-stage pipelines.
     var teacacheAvailable: Bool {
@@ -266,7 +279,8 @@ class GenerationViewModel: ObservableObject {
                     fps: fps,
                     audioStart: audioStart,
                     lowRam: lowRam,
-                    loraIds: selectedLoRAIdArray
+                    loraIds: selectedLoRAIdArray,
+                    negativePrompt: effectiveNegativePrompt
                 )
                 submitResponse = try await service.generateAudioToVideo(request: request, priority: priority)
             } else if let imagePath = sourceImagePath {
@@ -289,7 +303,8 @@ class GenerationViewModel: ObservableObject {
                     videoDecoder: isLTX25 ? videoDecoder : "conv",
                     segments: activeSegments,
                     generateAudio: generateAudio,
-                    enableTeacache: teacacheAvailable && enableTeacache
+                    enableTeacache: teacacheAvailable && enableTeacache,
+                    negativePrompt: effectiveNegativePrompt
                 )
                 submitResponse = try await service.generateImageToVideo(request: request, priority: priority)
             } else {
@@ -310,7 +325,8 @@ class GenerationViewModel: ObservableObject {
                     videoDecoder: isLTX25 ? videoDecoder : "conv",
                     segments: activeSegments,
                     generateAudio: generateAudio,
-                    enableTeacache: teacacheAvailable && enableTeacache
+                    enableTeacache: teacacheAvailable && enableTeacache,
+                    negativePrompt: effectiveNegativePrompt
                 )
                 submitResponse = try await service.generateTextToVideo(request: request, priority: priority)
             }
@@ -643,7 +659,7 @@ class GenerationViewModel: ObservableObject {
             seed: seed,
             fps: fps,
             guidanceScale: 1.0,
-            negativePrompt: "",
+            negativePrompt: negativePrompt,
             generateAudio: false
         )
         do {
@@ -665,6 +681,7 @@ class GenerationViewModel: ObservableObject {
         steps = p.steps
         seed = p.seed
         fps = p.fps
+        negativePrompt = p.negativePrompt ?? ""
         selectedPresetId = preset.id
     }
 

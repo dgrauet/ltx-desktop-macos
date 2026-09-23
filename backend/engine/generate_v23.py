@@ -212,6 +212,8 @@ def build_t2v_gen_kwargs(args: argparse.Namespace) -> dict:
         gen_kwargs["prompt_relay"] = PromptRelayInput(local_prompts=list(args.segment))
     if getattr(args, "enable_teacache", False):
         gen_kwargs["enable_teacache"] = True  # two-stage / two-stage-hq only (API-validated)
+    if getattr(args, "negative_prompt", None) is not None:
+        gen_kwargs["negative_prompt"] = args.negative_prompt  # CFG pipelines only (API-validated)
 
     if pipeline_type == "one-stage":
         gen_kwargs["num_steps"] = args.num_steps
@@ -267,6 +269,8 @@ def _run_a2v(pipeline, args: argparse.Namespace) -> None:
         "cfg_scale": args.cfg_scale,
         "stg_scale": args.stg_scale,
     }
+    if args.negative_prompt is not None:
+        gen_kwargs["negative_prompt"] = args.negative_prompt
 
     # Optional reference image — A2V also supports I2V conditioning.
     if args.image:
@@ -372,6 +376,7 @@ def _run_retake(pipeline, args: argparse.Namespace) -> None:
         num_steps=args.num_steps or 30,
         cfg_scale=args.cfg_scale,
         stg_scale=args.stg_scale,
+        negative_prompt=args.negative_prompt,
     )
 
     _progress("STATUS:Decoding video")
@@ -401,6 +406,7 @@ def _run_extend(pipeline, args: argparse.Namespace) -> None:
         num_steps=args.num_steps or 30,
         cfg_scale=args.cfg_scale,
         stg_scale=args.stg_scale,
+        negative_prompt=args.negative_prompt,
     )
 
     _progress("STATUS:Decoding video")
@@ -531,6 +537,10 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="Generated keyframe slots for fast motion (2.5 packs)")
     parser.add_argument("--video-decoder", choices=["conv", "diffusion"], default="conv",
                         help="Video VAE decoder; 'diffusion' is sharper/slower (2.5, experimental)")
+
+    # Negative prompt (CFG pipelines; None = the lib's DEFAULT_NEGATIVE_PROMPT)
+    parser.add_argument("--negative-prompt", default=None,
+                        help="What to steer away from (dev/CFG pipelines, A2V, retake, extend)")
 
     # Prompt Relay / audio / TeaCache
     parser.add_argument("--segment", action="append", default=None,

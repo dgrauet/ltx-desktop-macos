@@ -248,6 +248,7 @@ async def run_mlx_generation(
     segments: list[str] | None = None,
     generate_audio: bool = True,
     enable_teacache: bool = False,
+    negative_prompt: str | None = None,
     progress_callback: Callable[..., Awaitable[None]] | None = None,
     venv_python: str | None = None,
     model_repo_id: str | None = None,
@@ -297,6 +298,8 @@ async def run_mlx_generation(
         cmd.append("--no-audio")
     if enable_teacache:
         cmd.append("--enable-teacache")
+    if negative_prompt is not None:
+        cmd.extend(["--negative-prompt", negative_prompt])
 
     # I2V args
     if image:

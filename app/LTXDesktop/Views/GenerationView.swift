@@ -320,6 +320,20 @@ struct GenerationView: View {
                     }
                 }
 
+                // Negative prompt — CFG pipelines only
+                if vm.negativePromptApplies {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Negative prompt")
+                            .font(.subheadline)
+                        TextField("Default (blurry, distorted, artifacts…)", text: $vm.negativePrompt, axis: .vertical)
+                            .lineLimit(1...3)
+                            .textFieldStyle(.roundedBorder)
+                        Text("What to steer away from. Leave empty for the model's default.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
                 // IC-LoRA selection + strengths (only in IC-LoRA mode)
                 if vm.controlVideoPath != nil {
                     VStack(alignment: .leading, spacing: 10) {
