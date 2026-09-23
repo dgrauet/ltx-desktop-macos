@@ -6,9 +6,10 @@ stdout is left unused.
 
 Emits protocol lines on stderr:
   STATUS:<msg>          — human-readable phase label
-  STEP:<n>:<loss>:<lr>:<peak_gb>  — sampled at validation steps (loss/lr are 0.0
-                                    placeholders; the lib's StepCallback provides no
-                                    per-step loss in P0)
+  STEP:<n>:<loss>:<lr>:<peak_gb>  — every optimizer step, from the lib's
+                                    metrics_callback (loss averaged over
+                                    gradient-accumulation micro-batches; lr used
+                                    for that update; peak = MLX high-water mark)
   SAMPLE:<path>         — one line per sampled validation video
   DONE:<lora_path>      — final checkpoint path (full run only)
   PREFLIGHT_PEAK_GB:<v> — peak memory after N steps (--preflight mode)
@@ -20,11 +21,10 @@ Modes::
   Preflight:  --preflight N --steps N  → N steps + forced validation,
                                          emits PREFLIGHT_PEAK_GB:<v>, no final LoRA
 
-StepCallback contract (ltx_trainer_mlx 0.14):
-    StepCallback = Callable[[int, int, list[Path]], None]
-    args: (current_step, total_steps, sampled_video_paths)
-Called ONLY when validation videos are sampled (NOT every step).
-No loss or lr values are available from the callback — placeholders 0.0 are emitted.
+Trainer hooks (ltx-trainer-mlx, see make_training_callbacks):
+    step_callback(current_step, total_steps, sampled_video_paths) — after
+        validation/checkpointing; used only for SAMPLE lines.
+    metrics_callback(StepMetrics) — once per optimizer step; drives STEP lines.
 """
 from __future__ import annotations
 
@@ -35,6 +35,29 @@ from pathlib import Path
 
 def _progress(msg: str) -> None:
     print(msg, file=sys.stderr, flush=True)
+
+
+def make_training_callbacks(emit):
+    """Build the trainer's ``(step_callback, metrics_callback)`` pair.
+
+    Args:
+        emit: Sink for protocol lines (stderr in the subprocess).
+    """
+    from engine.training import protocol  # noqa: PLC0415
+
+    def step_callback(current_step: int, total_steps: int, sampled_video_paths: list[Path]) -> None:
+        for video_path in sampled_video_paths:
+            emit(protocol.format_sample(str(video_path)))
+
+    def metrics_callback(metrics) -> None:
+        emit(protocol.format_step(
+            step=metrics.step,
+            loss=float(metrics.loss),
+            lr=float(metrics.lr),
+            peak_gb=float(metrics.peak_memory_gb or 0.0),
+        ))
+
+    return step_callback, metrics_callback
 
 
 def main() -> int:  # noqa: PLR0911  (multiple return paths are intentional)
@@ -157,16 +180,7 @@ def main() -> int:  # noqa: PLR0911  (multiple return paths are intentional)
         enable_validation=args.validate,
     )
 
-    def step_callback(current_step: int, total_steps: int, sampled_video_paths: list[Path]) -> None:
-        """Called by trainer when validation videos are sampled.
-
-        The lib provides no per-step loss or lr in P0; placeholders 0.0 are
-        emitted so the protocol line is structurally valid for later parsing.
-        """
-        peak_gb = mx.get_peak_memory() / (1024 ** 3)
-        _progress(protocol.format_step(step=current_step, loss=0.0, lr=0.0, peak_gb=peak_gb))
-        for video_path in sampled_video_paths:
-            _progress(protocol.format_sample(str(video_path)))
+    step_callback, metrics_callback = make_training_callbacks(_progress)
 
     _progress("STATUS:Loading model")
     trainer = LtxvTrainer(cfg)
@@ -176,6 +190,7 @@ def main() -> int:  # noqa: PLR0911  (multiple return paths are intentional)
         ckpt_path, train_stats = trainer.train(
             disable_progress_bars=True,
             step_callback=step_callback,
+            metrics_callback=metrics_callback,
         )
     except Exception as exc:  # noqa: BLE001 — surface OOM/errors to parent
         _progress(protocol.format_error(f"{type(exc).__name__}: {exc}"))

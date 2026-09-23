@@ -1,3 +1,4 @@
+import Charts
 import SwiftUI
 
 struct TrainingRunView: View {
@@ -45,6 +46,10 @@ struct TrainingRunView: View {
                         ProgressView(value: 0.0)
                             .tint(.accentColor)
                             .opacity(vm.isTraining ? 1 : 0.3)
+                    }
+
+                    if !vm.lossHistory.isEmpty {
+                        lossChart
                     }
 
                     if vm.isTraining {
@@ -211,6 +216,45 @@ private struct RunRowView: View {
         case "cancelled": return "minus.circle.fill"
         case "running": return "arrow.2.circlepath.circle"
         default: return "circle"
+        }
+    }
+}
+
+extension TrainingRunView {
+
+    // MARK: - Loss curve
+
+    /// Raw per-step loss plus a moving average (diffusion loss is very noisy step to step).
+    private var lossChart: some View {
+        let points = vm.lossHistory
+        let window = max(1, points.count / 20)
+        let smoothed: [(Int, Double)] = points.indices.map { i in
+            let lo = max(0, i - window + 1)
+            let slice = points[lo...i]
+            return (points[i].step, slice.reduce(0) { $0 + $1.loss } / Double(slice.count))
+        }
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("Loss").font(.caption.weight(.medium))
+                Spacer()
+                if let last = smoothed.last {
+                    Text(String(format: "avg %.4f · lr %.1e", last.1, vm.liveLr))
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Chart {
+                ForEach(points) { p in
+                    LineMark(x: .value("Step", p.step), y: .value("Loss", p.loss), series: .value("Series", "raw"))
+                        .foregroundStyle(.secondary.opacity(0.35))
+                }
+                ForEach(smoothed, id: \.0) { step, loss in
+                    LineMark(x: .value("Step", step), y: .value("Loss", loss), series: .value("Series", "avg"))
+                        .foregroundStyle(Color.accentColor)
+                }
+            }
+            .chartXScale(domain: 0...max(vm.liveTotal, points.last?.step ?? 1))
+            .frame(height: 140)
         }
     }
 }

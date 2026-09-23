@@ -75,13 +75,14 @@ struct PreflightResult: Codable {
 /// Decoded from the training WebSocket stream at `/ws/progress/{job_id}`.
 /// Backend sends JSON dicts with a `type` discriminator.
 /// - status:  {"type":"status","status":"<string>"}
-/// - step:    {"type":"step","step":<int>,"loss":<float>,"lr":<float>,"peak_mem_gb":<float>}
+/// - step:    {"type":"step","step":<int>,"total":<int>,"loss":<float>,"lr":<float>,"peak_mem_gb":<float>}
+///            (one per optimizer step; loss averaged over gradient-accumulation micro-batches)
 /// - sample:  {"type":"sample","path":"<string>"}
 /// - done:    {"type":"done","lora_path":"<string>|null"}
 /// - error:   {"type":"error","message":"<string>"}
 enum TrainingEvent: Decodable {
     case status(String)
-    case step(step: Int, total: Int, peakMemGb: Double)
+    case step(step: Int, total: Int, loss: Double, lr: Double, peakMemGb: Double)
     case sample(String)
     case done(loraPath: String?)
     case error(String)
@@ -91,6 +92,8 @@ enum TrainingEvent: Decodable {
         case status
         case step
         case total
+        case loss
+        case lr
         case peakMemGb = "peak_mem_gb"
         case path
         case loraPath = "lora_path"
@@ -108,7 +111,9 @@ enum TrainingEvent: Decodable {
             let stepNum = try container.decode(Int.self, forKey: .step)
             let total = (try? container.decode(Int.self, forKey: .total)) ?? 0
             let peakMem = try container.decode(Double.self, forKey: .peakMemGb)
-            self = .step(step: stepNum, total: total, peakMemGb: peakMem)
+            let loss = (try? container.decode(Double.self, forKey: .loss)) ?? .nan
+            let lr = (try? container.decode(Double.self, forKey: .lr)) ?? 0
+            self = .step(step: stepNum, total: total, loss: loss, lr: lr, peakMemGb: peakMem)
         case "sample":
             let path = try container.decode(String.self, forKey: .path)
             self = .sample(path)
