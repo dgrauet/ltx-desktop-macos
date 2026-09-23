@@ -116,6 +116,19 @@ struct SettingsView: View {
                         .background(Color(.controlBackgroundColor).opacity(0.3))
                         .clipShape(RoundedRectangle(cornerRadius: 8))
 
+                        HStack {
+                            Button {
+                                chooseLocalModelFolder()
+                            } label: {
+                                Label("Add Local Model Folder…", systemImage: "folder.badge.plus")
+                                    .font(.caption)
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .help("Use an LTX pack directory you already have (e.g. a converted LTX-2.5 pack)")
+                            Spacer()
+                        }
+
                         // Disk usage summary
                         HStack(spacing: 16) {
                             HStack(spacing: 6) {
@@ -401,6 +414,32 @@ struct SettingsView: View {
         }
     }
 
+    private func chooseLocalModelFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Add Model"
+        panel.message = "Select an LTX model pack folder (contains embedded_config.json and transformer-*.safetensors)."
+
+        if panel.runModal() == .OK, let url = panel.url {
+            modelsVM.registerLocalModel(path: url.path, service: backendService)
+        }
+    }
+
+    private func badge(_ text: String, systemImage: String? = nil, tint: Color = .accentColor) -> some View {
+        HStack(spacing: 3) {
+            if let systemImage { Image(systemName: systemImage) }
+            Text(text)
+        }
+        .font(.caption2)
+        .fontWeight(.medium)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .background(tint.opacity(0.12))
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+    }
+
     private func modelRow(_ model: ModelInfo) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 12) {
@@ -416,13 +455,17 @@ struct SettingsView: View {
                             .font(.body)
                             .fontWeight(.medium)
 
-                        Text(model.typeLabel)
-                            .font(.caption2)
-                            .fontWeight(.medium)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.accentColor.opacity(0.12))
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                        badge(model.typeLabel)
+                        if model.isLTX25 {
+                            badge("LTX-2.5", tint: .purple)
+                        }
+                        if model.isLocal {
+                            badge("Local", systemImage: "folder", tint: .gray)
+                        }
+                        if model.gated == true && !model.downloaded {
+                            badge("Gated", systemImage: "lock", tint: .orange)
+                                .help("Requires a Hugging Face token and accepting the model licence on huggingface.co")
+                        }
                     }
 
                     Text(model.description)
@@ -482,15 +525,27 @@ struct SettingsView: View {
                                 .foregroundStyle(.green)
                         }
 
-                        Button {
-                            modelsVM.confirmDelete(model: model)
-                        } label: {
-                            Image(systemName: "trash")
-                                .font(.caption)
+                        if model.isLocal {
+                            Button {
+                                modelsVM.unregisterLocalModel(modelId: model.id, service: backendService)
+                            } label: {
+                                Image(systemName: "xmark.circle")
+                                    .font(.caption)
+                            }
+                            .buttonStyle(.borderless)
+                            .foregroundStyle(.secondary)
+                            .help("Remove from the list (files on disk are kept)")
+                        } else {
+                            Button {
+                                modelsVM.confirmDelete(model: model)
+                            } label: {
+                                Image(systemName: "trash")
+                                    .font(.caption)
+                            }
+                            .buttonStyle(.borderless)
+                            .foregroundStyle(.red.opacity(0.7))
+                            .help("Delete model to free disk space")
                         }
-                        .buttonStyle(.borderless)
-                        .foregroundStyle(.red.opacity(0.7))
-                        .help("Delete model to free disk space")
                     }
                 } else {
                     Button {

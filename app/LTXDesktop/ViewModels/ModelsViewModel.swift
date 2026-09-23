@@ -76,6 +76,30 @@ class ModelsViewModel: ObservableObject {
         }
     }
 
+    func registerLocalModel(path: String, service: BackendService) {
+        errorMessage = nil
+        Task {
+            do {
+                _ = try await service.registerLocalModel(path: path)
+                self.loadModels(service: service)
+            } catch {
+                self.errorMessage = "Could not add local model: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    func unregisterLocalModel(modelId: String, service: BackendService) {
+        errorMessage = nil
+        Task {
+            do {
+                try await service.unregisterLocalModel(modelId: modelId)
+                self.loadModels(service: service)
+            } catch {
+                self.errorMessage = "Could not remove local model: \(error.localizedDescription)"
+            }
+        }
+    }
+
     func selectModel(modelId: String, service: BackendService) {
         errorMessage = nil
         Task {

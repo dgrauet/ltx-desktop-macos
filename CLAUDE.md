@@ -19,6 +19,13 @@ Native macOS app replicating **LTX Desktop** (Lightricks) with **100% local infe
 - **VAE**: rebuilt for 2.3, better texture preservation
 - **HuggingFace**: `Lightricks/LTX-2.3`, pre-converted MLX: `dgrauet/ltx-2.3-mlx-q8`
 
+### LTX-2.5 (supported since 2026-09-24, ltx-2-mlx ≥0.15)
+- 22B DiT, joint audio+video; **Gemma 4 12B text encoder embedded in the pack** (`gemma_model_id` ignored). Pack family auto-detected (`embedded_config.json` → `transformer.ff_bias: false`) — `engine/model_family.py` mirrors the lib's `is_ltx25_pack` without importing MLX.
+- New: native multishot (write shots in order in one prompt), **auto-duration** DurationHead (`num_frames=AutoDuration`, 1–20 s), **generated keyframe slots** (`generated_keyframes`, fast motion), **diffusion video decoder** (`pipe.video_decoder="diffusion"`, experimental, ~22 GB at 1152×768×25). DFR not wired (experimental, extra gated download).
+- **Not on 2.5**: IC-LoRA, TeaCache, LoRA training (trainer 2.3-only), and any library LoRA (all target 2.3). The API returns 400; the UI hides them. Prompt enhancement still works (the app uses a standalone Gemma 3).
+- q8 transformer ≈ 19 GB → **low-RAM streaming forced on Macs < 64 GB** (`_apply_family_rules`). Verified 32 GB: q4 distilled 768×512×25 in ~2 min.
+- HF repos `dgrauet/ltx-2.5-mlx-q8` (~75 GB) / `-q4` (~47 GB) are **gated** (token + licence). Existing packs can be registered as **local models** (`POST /api/v1/models/local`, stored in `~/.ltx-desktop/local_models.json`; never deleted from disk).
+
 ### MLX on Apple Silicon
 - Unified CPU/GPU memory — no data copying
 - Key packages: `mlx`, `ltx-core-mlx`, `ltx-pipelines-mlx`, `ltx-trainer-mlx` (all pinned to tag `v0.15.9` of the [ltx-2-mlx](https://github.com/dgrauet/ltx-2-mlx) monorepo); `mlx>=0.32.2`
@@ -90,6 +97,8 @@ FastAPI in separate process for: crash isolation (OOM kills backend, not UI), GI
 **DONE (progressive preview + ETA, 2026-09-24):**
 - ✅ Progressive diffusion display wired end-to-end via lib `StepwisePreview` (`engine/preview.py`); per-pass ETA countdown from the lib's `[estimate]` lines shown in the status text.
 
+**DONE (LTX-2.5 support, 2026-09-24):** catalog entries (gated), local model packs, per-family capabilities on `GET /api/v1/models`, 2.5 options (auto duration / keyframe slots / decoder) in the Generation panel, 2.3-only features gated (API 400 + hidden UI), training tab banner. Also fixed stage numbering when a sampler `break`s early (2.5 ancestral).
+
 **REMAINING:**
 - **Negative prompt** — lib hardcodes `DEFAULT_NEGATIVE_PROMPT`; public `generate_and_save` accepts no custom negative. **Blocked on `ltx-2-mlx`** (add a `negative_prompt` arg)
 - **2× pixel upscale (ffmpeg lanczos)** — not implemented in backend (no lanczos/scale filter or endpoint). Note: the lib's two-stage pipeline has a *neural* upscaler, which is different
@@ -132,6 +141,11 @@ DELETE /api/v1/models/{model_id}         POST /api/v1/prompt/enhance
 POST /api/v1/export/video                POST /api/v1/export/fcpxml
 GET  /api/v1/system/health               GET  /api/v1/system/memory
 GET  /api/v1/history                     DELETE /api/v1/history/{job_id}
+```
+
+### Working too (LTX-2.5 / local packs)
+```
+POST /api/v1/models/local                DELETE /api/v1/models/local/{model_id}
 ```
 
 ### Working too (beta-tier in ltx-pipelines-mlx)

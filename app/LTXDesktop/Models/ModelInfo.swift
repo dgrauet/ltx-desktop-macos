@@ -8,6 +8,15 @@ struct ModelInfo: Identifiable, Codable {
     let modelType: String
     let downloaded: Bool
     let hfRepo: String
+    /// "hf" (catalog, HF cache) or "local" (user-registered pack directory)
+    let source: String?
+    let gated: Bool?
+    /// "2.3" / "2.5" for video generators
+    let family: String?
+    let capabilities: ModelCapabilities?
+
+    var isLocal: Bool { source == "local" }
+    var isLTX25: Bool { family == "2.5" }
 
     var sizeLabel: String { String(format: "%.1f GB", sizeGb) }
 
@@ -22,11 +31,33 @@ struct ModelInfo: Identifiable, Codable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, name, description, downloaded
+        case id, name, description, downloaded, source, gated, family, capabilities
         case sizeGb = "size_gb"
         case modelType = "model_type"
         case hfRepo = "hf_repo"
     }
+}
+
+/// Per-family feature availability reported by the backend.
+struct ModelCapabilities: Codable {
+    let enhance: Bool
+    let icLora: Bool
+    let training: Bool
+    let autoDuration: Bool
+    let generatedKeyframes: Bool
+    let diffusionDecoder: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case enhance, training
+        case icLora = "ic_lora"
+        case autoDuration = "auto_duration"
+        case generatedKeyframes = "generated_keyframes"
+        case diffusionDecoder = "diffusion_decoder"
+    }
+}
+
+struct LocalModelRequest: Encodable {
+    let path: String
 }
 
 struct HFTokenStatus: Codable {

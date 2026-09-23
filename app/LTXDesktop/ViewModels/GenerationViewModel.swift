@@ -69,6 +69,12 @@ class GenerationViewModel: ObservableObject {
     @Published var skipStage2: Bool = false
     /// Downloaded IC-LoRAs available for control generation (nil id = Union-Control default).
     @Published var availableICLoras: [ModelInfo] = []
+    /// Currently selected video model (nil = backend default, LTX-2.3 int8)
+    @Published var selectedModel: ModelInfo?
+    // LTX-2.5 only options
+    @Published var autoDuration = false
+    @Published var generatedKeyframes = 0
+    @Published var videoDecoder = "conv"
     @Published var selectedICLoraId: String? = nil
     @Published var isEnhancing: Bool = false
     @Published var imageStrength: Double = 1.0
@@ -263,7 +269,10 @@ class GenerationViewModel: ObservableObject {
                     pipelineType: pipelineType,
                     lowRam: lowRam,
                     imageStrength: imageStrength,
-                    loraIds: selectedLoRAIdArray
+                    loraIds: isLTX25 ? [] : selectedLoRAIdArray,
+                    autoDuration: isLTX25 && autoDuration,
+                    generatedKeyframes: isLTX25 ? generatedKeyframes : 0,
+                    videoDecoder: isLTX25 ? videoDecoder : "conv"
                 )
                 submitResponse = try await service.generateImageToVideo(request: request, priority: priority)
             } else {
@@ -278,7 +287,10 @@ class GenerationViewModel: ObservableObject {
                     fps: fps,
                     pipelineType: pipelineType,
                     lowRam: lowRam,
-                    loraIds: selectedLoRAIdArray
+                    loraIds: isLTX25 ? [] : selectedLoRAIdArray,
+                    autoDuration: isLTX25 && autoDuration,
+                    generatedKeyframes: isLTX25 ? generatedKeyframes : 0,
+                    videoDecoder: isLTX25 ? videoDecoder : "conv"
                 )
                 submitResponse = try await service.generateTextToVideo(request: request, priority: priority)
             }
@@ -487,10 +499,20 @@ class GenerationViewModel: ObservableObject {
 
     // MARK: - IC-LoRA Selection
 
-    /// Fetch downloaded IC-LoRAs (model_type == "ic-lora") for the control-mode picker.
-    func loadICLoras(service: BackendService) async {
+    /// True when the selected video model is an LTX-2.5 pack.
+    var isLTX25: Bool { selectedModel?.isLTX25 ?? false }
+
+    /// Fetch the selected video model (family/capabilities) and the downloaded
+    /// IC-LoRAs (model_type == "ic-lora") for the control-mode picker.
+    func loadModelContext(service: BackendService) async {
         do {
             let response = try await service.listModels()
+            selectedModel = response.models.first {
+                $0.modelType == "video_generator" && $0.hfRepo == response.selectedVideoModel
+            }
+            if isLTX25, controlVideoPath != nil {
+                controlVideoPath = nil  // IC-LoRA is not available on LTX-2.5
+            }
             availableICLoras = response.models.filter { $0.modelType == "ic-lora" && $0.downloaded }
             // Drop a stale selection if that IC-LoRA is no longer present.
             if let sel = selectedICLoraId, !availableICLoras.contains(where: { $0.id == sel }) {
