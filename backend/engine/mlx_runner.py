@@ -130,6 +130,10 @@ def get_model_repo(repo_id: str | None = None) -> tuple[str, bool]:
     """
     target_repo = repo_id or DEFAULT_MODEL_REPO
 
+    # Registered local pack (absolute directory path) — use as-is
+    if Path(target_repo).is_dir():
+        return target_repo, _is_quantized_model(Path(target_repo))
+
     model_path = _resolve_hf_model(target_repo)
     if model_path:
         quantized = _is_quantized_model(Path(model_path))
@@ -238,6 +242,9 @@ async def run_mlx_generation(
     extend_source: str | None = None,
     extend_frames: int = 49,
     extend_direction: str = "after",
+    auto_duration: bool = False,
+    generated_keyframes: int = 0,
+    video_decoder: str = "conv",
     progress_callback: Callable[..., Awaitable[None]] | None = None,
     venv_python: str | None = None,
     model_repo_id: str | None = None,
@@ -271,6 +278,14 @@ async def run_mlx_generation(
 
     if low_ram:
         cmd.append("--low-ram")
+
+    # LTX-2.5 options (validated against the model family by the API)
+    if auto_duration:
+        cmd.append("--auto-duration")
+    if generated_keyframes:
+        cmd.extend(["--generated-keyframes", str(generated_keyframes)])
+    if video_decoder != "conv":
+        cmd.extend(["--video-decoder", video_decoder])
 
     # I2V args
     if image:

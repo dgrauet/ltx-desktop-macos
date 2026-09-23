@@ -60,6 +60,9 @@ class TextToVideoPipeline:
         low_ram: bool = False,
         lora_args: list[str] | None = None,
         model_repo_id: str | None = None,
+        auto_duration: bool = False,
+        generated_keyframes: int = 0,
+        video_decoder: str = "conv",
         progress_callback: Callable[[int, int, float, str | None], None] | None = None,
     ) -> GenerationResult:
         """Run the full T2V generation pipeline.
@@ -133,6 +136,9 @@ class TextToVideoPipeline:
             lora_args=lora_args,
             progress_callback=_progress_adapter,
             model_repo_id=model_repo_id,
+            auto_duration=auto_duration,
+            generated_keyframes=generated_keyframes,
+            video_decoder=video_decoder,
         )
 
         stages["generation"] = time.monotonic() - t0
