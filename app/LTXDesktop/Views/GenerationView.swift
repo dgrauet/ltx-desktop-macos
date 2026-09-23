@@ -29,6 +29,9 @@ struct PlayerView: NSViewRepresentable {
 struct GenerationView: View {
     @EnvironmentObject var backendService: BackendService
     @EnvironmentObject var vm: GenerationViewModel
+    @EnvironmentObject var editor: EditorViewModel
+    /// Called after the result is added to the editor (switches to the Editor tab).
+    var onSendToEditor: () -> Void = {}
     @AppStorage("promptEnhanceEnabled") private var enhanceEnabled: Bool = true
     @State private var player: AVPlayer?
     @State private var showQueuePopover = false
@@ -1388,6 +1391,18 @@ struct GenerationView: View {
 
     private func videoActionButtons(url: URL) -> some View {
         HStack(spacing: 8) {
+            // Send to the video editor (current project, or a new one)
+            Button {
+                Task {
+                    await editor.sendGeneratedClip(path: url.path, jobId: vm.currentJobId)
+                    onSendToEditor()
+                }
+            } label: {
+                Image(systemName: "film.stack")
+                    .font(.system(size: 13))
+            }
+            .help(editor.project == nil ? "Send to Editor (new project)" : "Send to Editor (\(editor.project?.name ?? ""))")
+
             // Copy to clipboard
             Button {
                 NSPasteboard.general.clearContents()

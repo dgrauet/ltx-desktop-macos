@@ -99,6 +99,12 @@ FastAPI in separate process for: crash isolation (OOM kills backend, not UI), GI
 
 **DONE (LTX-2.5 support, 2026-09-24):** catalog entries (gated), local model packs, per-family capabilities on `GET /api/v1/models`, 2.5 options (auto duration / keyframe slots / decoder) in the Generation panel, 2.3-only features gated (API 400 + hidden UI), training tab banner. Also fixed stage numbering when a sampler `break`s early (2.5 ancestral).
 
+**DONE (J3 — Video Editor + Projects, 2026-09-24):**
+- ✅ **Editor tab**: projects (JSON in `~/.ltx-desktop/projects/<uuid>/project.json`, media referenced in place), asset bin (History / file import), magnetic video track + music track, split (⌘B) / trim / reorder / ripple delete / volume / mute, snapshot undo-redo (⌘Z / ⇧⌘Z), program monitor (AVPlayerView — **not** SwiftUI `VideoPlayer`), **takes** per clip with in-place Retake / Extend (existing endpoints), export MP4 (`AVAssetExportSession`) and multi-clip **FCPXML** (Swift, connected music clips). "Send to Editor" button on generation results.
+- Pure logic lives in `app/LTXEditorCore` (SwiftPM, Foundation only): **`cd app/LTXEditorCore && swift test`**. The app target compiles the same files (pbxproj file refs) — no package dependency.
+- Composition gotchas: video-composition instructions must cover the whole duration (black tail instruction when music outlasts video); one composition audio track per music clip (`insertTimeRange` shifts content).
+- Fixed: the app never stopped its backend on quit (orphaned uvicorn on :8000) — `ProcessManager` now stops it on `willTerminate`.
+
 **REMAINING:**
 - **Negative prompt** — lib hardcodes `DEFAULT_NEGATIVE_PROMPT`; public `generate_and_save` accepts no custom negative. **Blocked on `ltx-2-mlx`** (add a `negative_prompt` arg)
 - **2× pixel upscale (ffmpeg lanczos)** — not implemented in backend (no lanczos/scale filter or endpoint). Note: the lib's two-stage pipeline has a *neural* upscaler, which is different
@@ -115,7 +121,7 @@ FastAPI in separate process for: crash isolation (OOM kills backend, not UI), GI
 > `~/Work/.superpowers/ltx-desktop-macos/specs/2026-06-19-roadmap-cadrage.md`.
 > Decided jalon order: J0 (truth/debt) → J1 (Gen Space: A2V) →
 > J4a (IC-LoRA control) → J4b (LoRA training — **DONE P1 2026-06-23**) →
-> J2 (lib deps: step-loss callback + negative prompt) → J3 (Video Editor + Projects).
+> J2 (lib deps: step-loss callback + negative prompt) → J3 (Video Editor + Projects — **DONE 2026-09-24**).
 
 ### Phase 2 — Advanced Workflows (if product finds traction)
 - Simple timeline (2 video + 5 audio tracks, trim/split/reorder)
