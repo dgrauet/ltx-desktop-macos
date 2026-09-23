@@ -1,5 +1,6 @@
-import Foundation
+import AppKit
 import Combine
+import Foundation
 
 /// Manages the Python backend subprocess lifecycle.
 class ProcessManager: ObservableObject {
@@ -9,6 +10,33 @@ class ProcessManager: ObservableObject {
     private var process: Process?
     private var healthCheckTimer: Timer?
     private let backendURL = "http://127.0.0.1:8000"
+    private var terminateObserver: NSObjectProtocol?
+
+    init() {
+        // Stop the backend when the app quits; otherwise it is orphaned and keeps
+        // holding port 8000 (and any GPU memory) after the window is gone.
+        terminateObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification, object: nil, queue: nil
+        ) { [weak self] _ in
+            self?.stopBackendAndWait()
+        }
+    }
+
+    /// Synchronous shutdown for app termination: SIGTERM, wait up to 5 s, then SIGKILL.
+    func stopBackendAndWait(timeout: TimeInterval = 5) {
+        healthCheckTimer?.invalidate()
+        healthCheckTimer = nil
+        guard let proc = process, proc.isRunning else { return }
+        proc.terminate()
+        let deadline = Date().addingTimeInterval(timeout)
+        while proc.isRunning && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        if proc.isRunning {
+            kill(proc.processIdentifier, SIGKILL)
+        }
+        process = nil
+    }
 
     func startBackend() {
         guard process == nil else { return }
