@@ -15,6 +15,14 @@ log = logging.getLogger(__name__)
 
 _OUTPUT_DIR = Path.home() / ".ltx-desktop" / "outputs" / "extensions"
 
+# The VAE compresses time 8x: one latent frame decodes to 8 pixel frames.
+_VAE_TEMPORAL_FACTOR = 8
+
+
+def _pixel_to_latent_frames(pixel_frames: int) -> int:
+    """Convert a pixel-frame extension count to the latent frames the lib expects."""
+    return max(1, pixel_frames // _VAE_TEMPORAL_FACTOR)
+
 
 @dataclass
 class GenerationResult:
@@ -51,6 +59,8 @@ class ExtendPipeline:
 
         # Map "forward"/"backward" to library "after"/"before"
         lib_direction = "after" if direction == "forward" else "before"
+        # extend_from_video counts latent frames; the API speaks pixel frames
+        latent_frames = _pixel_to_latent_frames(extension_frames)
 
         gen_result = await run_mlx_generation(
             prompt=prompt,
@@ -63,7 +73,7 @@ class ExtendPipeline:
             mode="extend",
             num_steps=steps,
             extend_source=source_video_path,
-            extend_frames=extension_frames,
+            extend_frames=latent_frames,
             extend_direction=lib_direction,
             model_repo_id=model_repo_id,
             progress_callback=progress_callback,
