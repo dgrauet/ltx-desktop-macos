@@ -11,6 +11,9 @@ import base64
 import logging
 import os
 import re
+import shutil
+import tempfile
+import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
@@ -38,6 +41,11 @@ _STAGE_RE = re.compile(r"^STAGE:(\d+):STEP:(\d+):(\d+)")
 _STATUS_RE = re.compile(r"^STATUS:(.+)")
 _MEMORY_RE = re.compile(r"^MEMORY:(\w+):active=([\d.]+):cache=([\d.]+):peak=([\d.]+)")
 _PREVIEW_RE = re.compile(r"^PREVIEW:(.+)")
+# Lib timing projection, printed after the first/second step of each denoise loop
+_ESTIMATE_RE = re.compile(r"^\[estimate\] ")
+_ESTIMATE_REMAINING_RE = re.compile(r": ~(.+?) remaining")
+_DURATION_PART_RE = re.compile(r"(\d+)\s*(h|min|s)\b")
+_DURATION_UNITS = {"h": 3600, "min": 60, "s": 1}
 
 # Progress ranges for mapping STAGE lines to 0.0-1.0.
 # All default pipelines (distilled, two-stage, two-stage-hq) run two denoise
@@ -60,6 +68,54 @@ _STATUS_PROGRESS = {
     "saving": 0.97,
     "done": 1.0,
 }
+
+
+def parse_duration(text: str) -> float | None:
+    """Parse the lib's ``format_duration`` output (``5 s`` / ``1 min 30 s`` / ``1 h 30 min``)."""
+    parts = _DURATION_PART_RE.findall(text)
+    if not parts:
+        return None
+    return float(sum(int(n) * _DURATION_UNITS[unit] for n, unit in parts))
+
+
+class EtaTracker:
+    """Turns ``[estimate] … ~X remaining`` lines into a countdown for the current denoise loop."""
+
+    def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
+        self._clock = clock
+        self._deadline: float | None = None
+
+    def feed(self, line: str) -> bool:
+        """Consume an ``[estimate]`` line; returns False for any other line.
+
+        A projection line (``~X remaining``) starts the countdown; the work
+        announcement that opens each new denoise loop clears it.
+        """
+        if not _ESTIMATE_RE.match(line):
+            return False
+        m = _ESTIMATE_REMAINING_RE.search(line)
+        seconds = parse_duration(m.group(1)) if m else None
+        self._deadline = None if seconds is None else self._clock() + seconds
+        return True
+
+    def reset(self) -> None:
+        self._deadline = None
+
+    def status(self, base: str) -> str:
+        """``base`` with the remaining time appended while a projection is live."""
+        if self._deadline is None:
+            return base
+        remaining = round(self._deadline - self._clock())
+        if remaining <= 0:
+            return base
+        if remaining < 60:
+            return f"{base} — ~{remaining}s left in this pass"
+        return f"{base} — ~{remaining // 60}m {remaining % 60:02d}s left in this pass"
+
+
+def preview_enabled(low_ram: bool) -> bool:
+    """Progressive previews keep the VAE decoder resident, which defeats low-RAM block streaming."""
+    return not low_ram and os.environ.get("LTX_PREVIEW", "1") != "0"
 
 
 # ---------------------------------------------------------------------------
@@ -261,6 +317,12 @@ async def run_mlx_generation(
         if mode == "i2v":
             cmd.extend(["--enhance-mode", "i2v"])
 
+    # Progressive preview (stepwise decode of the x0 prediction)
+    preview_dir: str | None = None
+    if preview_enabled(low_ram):
+        preview_dir = tempfile.mkdtemp(prefix="ltx-preview-")
+        cmd.extend(["--preview-dir", preview_dir])
+
     # Launch subprocess — ensure ffmpeg is findable (Xcode strips PATH)
     env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
     path = env.get("PATH", "")
@@ -269,108 +331,119 @@ async def run_mlx_generation(
             path = f"{extra}:{path}"
     env["PATH"] = path
 
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        cwd=backend_dir,
-        env=env,
-    )
-
-    # Parse stderr for progress
-    subprocess_memory: dict[str, dict] = {}
-    last_pct = 0.0
-    last_step, last_total = 0, 0
-    # Keep last N stderr lines for error diagnosis (readline consumes them)
-    from collections import deque
-    _stderr_tail: deque[str] = deque(maxlen=100)
-
-    assert proc.stderr is not None
-    while True:
-        line_bytes = await proc.stderr.readline()
-        if not line_bytes:
-            break
-        line = line_bytes.decode("utf-8", errors="replace").rstrip()
-        if line:
-            _stderr_tail.append(line)
-
-        # PREVIEW frame
-        m = _PREVIEW_RE.match(line)
-        if m:
-            fpath = m.group(1).strip()
-            try:
-                with open(fpath, "rb") as f:
-                    b64_frame = base64.b64encode(f.read()).decode("ascii")
-                os.unlink(fpath)
-                if progress_callback:
-                    r = progress_callback(
-                        last_step, last_total, last_pct, b64_frame, status=None,
-                    )
-                    if asyncio.iscoroutine(r):
-                        await r
-            except Exception:
-                log.debug("Failed to read preview frame: %s", fpath)
-            continue
-
-        # STAGE/STEP progress
-        m = _STAGE_RE.match(line)
-        if m:
-            stage, step, total = int(m.group(1)), int(m.group(2)), int(m.group(3))
-            pct = _compute_progress(stage, step, total)
-            last_pct, last_step, last_total = pct, step, total
-            if progress_callback:
-                r = progress_callback(step, total, pct, None, status="Generating video")
-                if asyncio.iscoroutine(r):
-                    await r
-            continue
-
-        # MEMORY snapshot
-        m = _MEMORY_RE.match(line)
-        if m:
-            label = m.group(1)
-            subprocess_memory[label] = {
-                "active_memory_gb": float(m.group(2)),
-                "cache_memory_gb": float(m.group(3)),
-                "peak_memory_gb": float(m.group(4)),
-            }
-            log.info("MEMORY[%s] active=%.1fGB cache=%.1fGB peak=%.1fGB",
-                     label, float(m.group(2)), float(m.group(3)), float(m.group(4)))
-            continue
-
-        # STATUS message
-        m = _STATUS_RE.match(line)
-        if m:
-            status_msg = m.group(1).strip()
-            status_lower = status_msg.lower()
-            for key, pct_val in _STATUS_PROGRESS.items():
-                if key in status_lower:
-                    last_pct = pct_val
-                    break
-            if progress_callback:
-                r = progress_callback(last_step, last_total, last_pct, None, status=status_msg)
-                if asyncio.iscoroutine(r):
-                    await r
-            continue
-
-        # Other stderr lines -> log
-        if line:
-            log.debug("subprocess: %s", line[-200:])
-
-    await proc.wait()
-
-    if proc.returncode != 0:
-        # Build error message from captured stderr tail (readline already consumed everything)
-        error_tail = "\n".join(_stderr_tail)[-1000:]
-        if proc.returncode == -6:
-            raise RuntimeError(f"GPU out of memory (exit code -6). {error_tail}")
-        raise RuntimeError(
-            f"Generation subprocess failed (exit {proc.returncode}). {error_tail}"
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=backend_dir,
+            env=env,
         )
 
-    return {
-        "output_path": output_path,
-        "subprocess_memory": subprocess_memory,
-    }
+        # Parse stderr for progress
+        subprocess_memory: dict[str, dict] = {}
+        last_pct = 0.0
+        last_step, last_total = 0, 0
+        eta = EtaTracker()
+        # Keep last N stderr lines for error diagnosis (readline consumes them)
+        from collections import deque
+        _stderr_tail: deque[str] = deque(maxlen=100)
+
+        assert proc.stderr is not None
+        while True:
+            line_bytes = await proc.stderr.readline()
+            if not line_bytes:
+                break
+            line = line_bytes.decode("utf-8", errors="replace").rstrip()
+            if line:
+                _stderr_tail.append(line)
+
+            # PREVIEW frame
+            m = _PREVIEW_RE.match(line)
+            if m:
+                fpath = m.group(1).strip()
+                try:
+                    with open(fpath, "rb") as f:
+                        b64_frame = base64.b64encode(f.read()).decode("ascii")
+                    os.unlink(fpath)
+                    if progress_callback:
+                        r = progress_callback(
+                            last_step, last_total, last_pct, b64_frame, status=None,
+                        )
+                        if asyncio.iscoroutine(r):
+                            await r
+                except Exception:
+                    log.debug("Failed to read preview frame: %s", fpath)
+                continue
+
+            # STAGE/STEP progress
+            m = _STAGE_RE.match(line)
+            if m:
+                stage, step, total = int(m.group(1)), int(m.group(2)), int(m.group(3))
+                pct = _compute_progress(stage, step, total)
+                last_pct, last_step, last_total = pct, step, total
+                if progress_callback:
+                    status = eta.status("Generating video")
+                    r = progress_callback(step, total, pct, None, status=status)
+                    if asyncio.iscoroutine(r):
+                        await r
+                continue
+
+            # MEMORY snapshot
+            m = _MEMORY_RE.match(line)
+            if m:
+                label = m.group(1)
+                subprocess_memory[label] = {
+                    "active_memory_gb": float(m.group(2)),
+                    "cache_memory_gb": float(m.group(3)),
+                    "peak_memory_gb": float(m.group(4)),
+                }
+                log.info("MEMORY[%s] active=%.1fGB cache=%.1fGB peak=%.1fGB",
+                         label, float(m.group(2)), float(m.group(3)), float(m.group(4)))
+                continue
+
+            # Lib timing projection -> countdown shown with the step status
+            if eta.feed(line):
+                continue
+
+            # STATUS message
+            m = _STATUS_RE.match(line)
+            if m:
+                status_msg = m.group(1).strip()
+                eta.reset()
+                status_lower = status_msg.lower()
+                for key, pct_val in _STATUS_PROGRESS.items():
+                    if key in status_lower:
+                        last_pct = pct_val
+                        break
+                if progress_callback:
+                    r = progress_callback(last_step, last_total, last_pct, None, status=status_msg)
+                    if asyncio.iscoroutine(r):
+                        await r
+                continue
+
+            # Other stderr lines -> log
+            if line:
+                log.debug("subprocess: %s", line[-200:])
+
+        await proc.wait()
+
+        if proc.returncode != 0:
+            # Build error message from captured stderr tail (readline already consumed everything)
+            error_tail = "\n".join(_stderr_tail)[-1000:]
+            if proc.returncode == -6:
+                raise RuntimeError(f"GPU out of memory (exit code -6). {error_tail}")
+            raise RuntimeError(
+                f"Generation subprocess failed (exit {proc.returncode}). {error_tail}"
+            )
+
+        return {
+            "output_path": output_path,
+            "subprocess_memory": subprocess_memory,
+        }
+    finally:
+        if preview_dir:
+            shutil.rmtree(preview_dir, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------

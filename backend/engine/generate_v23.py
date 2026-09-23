@@ -5,6 +5,7 @@ Emits progress on stderr in the format parsed by mlx_runner.py:
   STATUS:<message>
   STAGE:<n>:STEP:<step>:<total>
   MEMORY:<label>:active=<gb>:cache=<gb>:peak=<gb>
+  PREVIEW:<path>   (with --preview-dir; see engine/preview.py)
 """
 
 from __future__ import annotations
@@ -502,6 +503,10 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lora", action="append", default=None,
                         help="LoRA path:strength (can repeat)")
 
+    # Progressive preview
+    parser.add_argument("--preview-dir", default=None,
+                        help="Write stepwise previews here and announce them as PREVIEW:<path>")
+
     # Enhancement
     parser.add_argument("--enhance-prompt", action="store_true",
                         help="Enhance prompt via Gemma before generation")
@@ -519,6 +524,11 @@ def main() -> None:
 
     _install_tqdm_hook()
     pipeline = _create_pipeline(args)
+    if args.preview_dir:
+        from engine.preview import make_preview
+        pipeline.stepwise = make_preview(
+            args.preview_dir, fps=args.fps, seed=args.seed, emit=_progress,
+        )
 
     if args.mode == "retake":
         _run_retake(pipeline, args)

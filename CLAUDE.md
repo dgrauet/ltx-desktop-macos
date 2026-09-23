@@ -87,8 +87,10 @@ FastAPI in separate process for: crash isolation (OOM kills backend, not UI), GI
 - ✅ Deps pinned to tag `v0.15.9` (was `@main`). Fixes retake/extend `TypeError` (0.14.14 `RetakePipeline` rejected `low_ram_streaming`); extend now honours the selected model. `tests/test_pipeline_ctor_kwargs.py` binds every pipeline constructor's kwargs to the real lib signatures.
 - Lib 0.15 unlocks: per-step `on_step` / `StepwisePreview` (progressive preview), `[estimate]` ETA lines, LTX-2.5 packs (auto-detected, Gemma-4 TE embedded), `generate_audio=False`, Prompt Relay. Still missing upstream: custom `negative_prompt`, trainer step-loss callback.
 
+**DONE (progressive preview + ETA, 2026-09-24):**
+- ✅ Progressive diffusion display wired end-to-end via lib `StepwisePreview` (`engine/preview.py`); per-pass ETA countdown from the lib's `[estimate]` lines shown in the status text.
+
 **REMAINING:**
-- **Progressive diffusion display** — consumer plumbing (mlx_runner → VM → View) exists but the subprocess **never emits `PREVIEW:`**. **Unblocked** by lib 0.14.21+ `StepwisePreview` / `on_step` — wiring pending
 - **Negative prompt** — lib hardcodes `DEFAULT_NEGATIVE_PROMPT`; public `generate_and_save` accepts no custom negative. **Blocked on `ltx-2-mlx`** (add a `negative_prompt` arg)
 - **2× pixel upscale (ffmpeg lanczos)** — not implemented in backend (no lanczos/scale filter or endpoint). Note: the lib's two-stage pipeline has a *neural* upscaler, which is different
 - Generation performance (~8min for 97f@768×512) — mx.compile disabled (see Performance section); TeaCache available in lib (`enable_teacache`, ~1.5× on Euler) but not yet exposed
@@ -226,7 +228,7 @@ UI `pipeline_type` → library class:
 I2V works on every pipeline via `image=` kwarg (no dedicated I2V class since lib 0.10). Retake & extend share the unified `RetakePipeline`. `frame_rate=` is a mandatory keyword on all generate calls (lib 0.14 breaking change). `low_ram_streaming` streams DiT blocks from disk (~75% less transformer RAM); the lib auto-tiles VAE decode on HD/long runs (budget via `LTX2_VAE_DECODE_BUDGET_GB`, default 8GB).
 
 ### Progressive Diffusion Display
-Every 2 steps, decode middle temporal frame → JPEG → temp file → base64 → WebSocket. ~800ms total overhead per 8-step gen. Enabled for T2V/I2V, disabled for rapid preview.
+`generate_v23 --preview-dir D` sets `pipeline.stepwise` to `engine/preview.EmittingPreview` (lib `StepwisePreview`): every 2 steps (+ the last) it decodes **one** latent frame of the x0 prediction (middle of the clip) → WebP in `D` → `PREVIEW:<path>` on stderr → `mlx_runner` base64s + deletes it → WebSocket `preview_frame` → `NSImage`. All pipelines (both stages of two-stage ones). ~7 previews per distilled gen. **Off when `low_ram`** (keeps the VAE decoder resident, defeats block streaming) or `LTX_PREVIEW=0`. `[estimate] … ~X remaining` lines drive a per-pass countdown (`EtaTracker`) appended to the step status.
 
 ### Single-Subprocess Architecture
 Single subprocess per generation. The library's `low_memory=True` handles staged loading:
