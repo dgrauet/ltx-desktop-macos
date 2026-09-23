@@ -244,6 +244,27 @@ struct GenerationView: View {
                     ltx25Section
                 }
 
+                // Shots (Prompt Relay), audio, TeaCache — text/image-to-video only
+                if vm.sourceAudioPath == nil && vm.controlVideoPath == nil {
+                    shotsSection
+
+                    Toggle("Generate audio", isOn: $vm.generateAudio)
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+
+                    if vm.teacacheAvailable {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Toggle("TeaCache (faster)", isOn: $vm.enableTeacache)
+                                .toggleStyle(.switch)
+                                .controlSize(.small)
+                            Text("Skips redundant stage-1 steps: ~1.5× faster, slight quality loss.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+
                 // Low RAM mode (DiT block streaming)
                 VStack(alignment: .leading, spacing: 4) {
                     Toggle("Low RAM mode", isOn: $vm.lowRam)
@@ -496,6 +517,58 @@ struct GenerationView: View {
     /// Auto duration only applies to text/image-to-video on LTX-2.5.
     private var autoDurationActive: Bool {
         vm.isLTX25 && vm.autoDuration && vm.sourceAudioPath == nil
+    }
+
+    // MARK: - Shots (Prompt Relay)
+
+    private var shotsSection: some View {
+        DisclosureGroup(isExpanded: $shotsExpanded) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Each shot prompt steers its own slice of the clip, in order. The main prompt still applies throughout.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                ForEach(vm.segments.indices, id: \.self) { i in
+                    HStack(spacing: 6) {
+                        Text("\(i + 1)")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .frame(width: 14)
+                        TextField("Shot \(i + 1)", text: Binding(
+                            get: { i < vm.segments.count ? vm.segments[i] : "" },
+                            set: { if i < vm.segments.count { vm.segments[i] = $0 } }
+                        ))
+                        .textFieldStyle(.roundedBorder)
+                        Button {
+                            vm.segments.remove(at: i)
+                        } label: {
+                            Image(systemName: "minus.circle")
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+                Button {
+                    vm.segments.append("")
+                } label: {
+                    Label("Add shot", systemImage: "plus.circle")
+                        .font(.caption)
+                }
+                .buttonStyle(.borderless)
+                .disabled(vm.segments.count >= 8)
+            }
+            .padding(.top, 4)
+        } label: {
+            HStack {
+                Text("Shots")
+                    .font(.subheadline)
+                if !vm.activeSegments.isEmpty {
+                    Text("\(vm.activeSegments.count)")
+                        .font(.caption2)
+                        .padding(.horizontal, 6)
+                        .background(Color.accentColor.opacity(0.15), in: Capsule())
+                }
+            }
+        }
     }
 
     // MARK: - LTX-2.5 Options
@@ -815,6 +888,7 @@ struct GenerationView: View {
     // MARK: - LoRA Section
 
     @State private var loraExpanded: Bool = false
+    @State private var shotsExpanded: Bool = false
 
     private var loraSection: some View {
         DisclosureGroup(isExpanded: $loraExpanded) {

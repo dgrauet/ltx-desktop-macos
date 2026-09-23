@@ -75,6 +75,20 @@ class GenerationViewModel: ObservableObject {
     @Published var autoDuration = false
     @Published var generatedKeyframes = 0
     @Published var videoDecoder = "conv"
+    /// Prompt Relay "shots": local prompts gated to successive slices of the clip
+    @Published var segments: [String] = []
+    @Published var generateAudio = true
+    @Published var enableTeacache = false
+
+    /// TeaCache only exists for the LTX-2.3 two-stage pipelines.
+    var teacacheAvailable: Bool {
+        !isLTX25 && (pipelineType == "two-stage" || pipelineType == "two-stage-hq")
+    }
+
+    /// Non-empty shot prompts, trimmed.
+    var activeSegments: [String] {
+        segments.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+    }
     @Published var selectedICLoraId: String? = nil
     @Published var isEnhancing: Bool = false
     @Published var imageStrength: Double = 1.0
@@ -272,7 +286,10 @@ class GenerationViewModel: ObservableObject {
                     loraIds: isLTX25 ? [] : selectedLoRAIdArray,
                     autoDuration: isLTX25 && autoDuration,
                     generatedKeyframes: isLTX25 ? generatedKeyframes : 0,
-                    videoDecoder: isLTX25 ? videoDecoder : "conv"
+                    videoDecoder: isLTX25 ? videoDecoder : "conv",
+                    segments: activeSegments,
+                    generateAudio: generateAudio,
+                    enableTeacache: teacacheAvailable && enableTeacache
                 )
                 submitResponse = try await service.generateImageToVideo(request: request, priority: priority)
             } else {
@@ -290,7 +307,10 @@ class GenerationViewModel: ObservableObject {
                     loraIds: isLTX25 ? [] : selectedLoRAIdArray,
                     autoDuration: isLTX25 && autoDuration,
                     generatedKeyframes: isLTX25 ? generatedKeyframes : 0,
-                    videoDecoder: isLTX25 ? videoDecoder : "conv"
+                    videoDecoder: isLTX25 ? videoDecoder : "conv",
+                    segments: activeSegments,
+                    generateAudio: generateAudio,
+                    enableTeacache: teacacheAvailable && enableTeacache
                 )
                 submitResponse = try await service.generateTextToVideo(request: request, priority: priority)
             }

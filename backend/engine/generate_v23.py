@@ -206,6 +206,12 @@ def build_t2v_gen_kwargs(args: argparse.Namespace) -> dict:
     }
     if getattr(args, "generated_keyframes", 0):
         gen_kwargs["generated_keyframes"] = args.generated_keyframes
+    if getattr(args, "segment", None):
+        # Prompt Relay: each local prompt is gated to an even slice of the timeline
+        from ltx_core_mlx.conditioning.prompt_relay import PromptRelayInput
+        gen_kwargs["prompt_relay"] = PromptRelayInput(local_prompts=list(args.segment))
+    if getattr(args, "enable_teacache", False):
+        gen_kwargs["enable_teacache"] = True  # two-stage / two-stage-hq only (API-validated)
 
     if pipeline_type == "one-stage":
         gen_kwargs["num_steps"] = args.num_steps
@@ -526,6 +532,14 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--video-decoder", choices=["conv", "diffusion"], default="conv",
                         help="Video VAE decoder; 'diffusion' is sharper/slower (2.5, experimental)")
 
+    # Prompt Relay / audio / TeaCache
+    parser.add_argument("--segment", action="append", default=None,
+                        help="Prompt Relay local prompt, gated to its timeline slice (repeatable)")
+    parser.add_argument("--no-audio", action="store_true",
+                        help="Skip audio decode and mux (video only)")
+    parser.add_argument("--enable-teacache", action="store_true",
+                        help="TeaCache stage-1 acceleration (two-stage pipelines, LTX-2.3)")
+
     # Progressive preview
     parser.add_argument("--preview-dir", default=None,
                         help="Write stepwise previews here and announce them as PREVIEW:<path>")
@@ -549,6 +563,8 @@ def main() -> None:
     pipeline = _create_pipeline(args)
     if args.video_decoder != "conv":
         pipeline.video_decoder = args.video_decoder
+    if args.no_audio:
+        pipeline.generate_audio = False
     if args.preview_dir:
         from engine.preview import make_preview
         pipeline.stepwise = make_preview(

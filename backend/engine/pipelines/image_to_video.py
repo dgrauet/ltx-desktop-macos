@@ -54,6 +54,9 @@ class ImageToVideoPipeline:
         auto_duration: bool = False,
         generated_keyframes: int = 0,
         video_decoder: str = "conv",
+        segments: list[str] | None = None,
+        generate_audio: bool = True,
+        enable_teacache: bool = False,
         progress_callback: Callable[[int, int, float, str | None], None] | None = None,
     ) -> GenerationResult:
         """Run the I2V generation pipeline.
@@ -134,6 +137,9 @@ class ImageToVideoPipeline:
             auto_duration=auto_duration,
             generated_keyframes=generated_keyframes,
             video_decoder=video_decoder,
+            segments=segments,
+            generate_audio=generate_audio,
+            enable_teacache=enable_teacache,
         )
 
         stages["generation"] = time.monotonic() - t0
