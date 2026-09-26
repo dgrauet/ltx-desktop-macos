@@ -1254,6 +1254,7 @@ async def _run_extend(job_id: str, req: ExtendRequest) -> None:
             steps=req.steps,
             seed=_resolve_seed(req.seed),
             fps=req.fps,
+            model_repo_id=selected_video_model,
             progress_callback=progress_cb,
         )
         jobs[job_id]["status"] = "completed"

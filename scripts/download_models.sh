@@ -44,8 +44,8 @@ else
 fi
 
 # 3. Download LTX-2.3 pre-converted MLX model (int8 quantized, ~28GB)
-LTX_MODEL="dgrauet/ltx-2.3-mlx-distilled-q8"
-LTX_CACHE_DIR="$HF_CACHE/models--dgrauet--ltx-2.3-mlx-distilled-q8"
+LTX_MODEL="dgrauet/ltx-2.3-mlx-q8"
+LTX_CACHE_DIR="$HF_CACHE/models--dgrauet--ltx-2.3-mlx-q8"
 
 echo ""
 echo -e "${BLUE}[1/3] LTX-2.3 video generation model (MLX int8)${NC}"

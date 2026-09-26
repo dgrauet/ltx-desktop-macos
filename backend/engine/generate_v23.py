@@ -101,12 +101,15 @@ def _report_memory(label: str) -> None:
 # Pipeline factory
 # ---------------------------------------------------------------------------
 
-def _create_pipeline(args: argparse.Namespace):
-    """Instantiate the correct library pipeline for the given mode and pipeline type.
+def resolve_pipeline(args: argparse.Namespace) -> tuple[type, dict]:
+    """Pick the library pipeline class and its constructor kwargs.
 
     Since ltx-2-mlx 0.10, I2V is supported on every pipeline via the
     ``image=`` kwarg (no dedicated ImageToVideoPipeline), and extend is
     folded into RetakePipeline.
+
+    Returns:
+        ``(pipeline_class, kwargs)`` — instantiate as ``cls(model_dir, **kwargs)``.
     """
     from ltx_pipelines_mlx import (
         A2VidPipelineTwoStage,
@@ -118,7 +121,6 @@ def _create_pipeline(args: argparse.Namespace):
         TI2VidTwoStagesPipeline,
     )
 
-    model_dir = args.model_dir
     common = {
         "gemma_model_id": args.gemma or "mlx-community/gemma-3-12b-it-4bit",
         "low_memory": True,
@@ -127,22 +129,26 @@ def _create_pipeline(args: argparse.Namespace):
     pipeline_type = getattr(args, "pipeline_type", "distilled")
 
     if args.mode in ("retake", "extend"):
-        return RetakePipeline(model_dir, **common)
+        return RetakePipeline, common
     elif args.mode == "a2v":
         # A2V is its own two-stage Euler+CFG pipeline; it ignores pipeline_type.
-        return A2VidPipelineTwoStage(model_dir, **common)
+        return A2VidPipelineTwoStage, common
     elif args.mode == "ic-lora":
-        return ICLoraPipeline(
-            model_dir, lora_paths=_parse_lora_args(args.ic_lora or []), **common,
-        )
+        return ICLoraPipeline, {"lora_paths": _parse_lora_args(args.ic_lora or []), **common}
     elif pipeline_type == "two-stage":
-        return TI2VidTwoStagesPipeline(model_dir, **common)
+        return TI2VidTwoStagesPipeline, common
     elif pipeline_type == "two-stage-hq":
-        return TI2VidTwoStagesHQPipeline(model_dir, **common)
+        return TI2VidTwoStagesHQPipeline, common
     elif pipeline_type == "one-stage":
-        return TI2VidOneStagePipeline(model_dir, **common)
+        return TI2VidOneStagePipeline, common
     else:  # distilled (fastest, 8+3 steps, no CFG)
-        return DistilledPipeline(model_dir, **common)
+        return DistilledPipeline, common
+
+
+def _create_pipeline(args: argparse.Namespace):
+    """Instantiate the correct library pipeline for the given mode and pipeline type."""
+    cls, kwargs = resolve_pipeline(args)
+    return cls(args.model_dir, **kwargs)
 
 
 # ---------------------------------------------------------------------------
