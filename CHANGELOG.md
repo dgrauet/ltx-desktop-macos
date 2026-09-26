@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2](https://github.com/dgrauet/ltx-desktop-macos/compare/v0.2.1...v0.2.2) (2026-09-26)
+
+
+### Features
+
+* **api:** LTX-2.5 generation options and family gating ([eb6c760](https://github.com/dgrauet/ltx-desktop-macos/commit/eb6c7604141ed604240b6a0b999a660e85563bb8))
+* DFR max-detail pipeline for LTX-2.5 ([037b9fb](https://github.com/dgrauet/ltx-desktop-macos/commit/037b9fb8f28080d84ce88f20c730e3c4eebf260c))
+* **editor:** video editor and projects (J3) ([43114e3](https://github.com/dgrauet/ltx-desktop-macos/commit/43114e3418904a62cc921b72828c8ffb87660fc1))
+* **generation:** custom negative prompt on CFG pipelines ([5d4094c](https://github.com/dgrauet/ltx-desktop-macos/commit/5d4094cf31302cefedd0fa8a66b16b693864f5df))
+* **generation:** DFR max-detail pipeline for LTX-2.5 ([d0b931b](https://github.com/dgrauet/ltx-desktop-macos/commit/d0b931b2777e2f087b336203a760264e1fb6dd31))
+* **generation:** progressive diffusion previews and per-pass ETA ([51bc472](https://github.com/dgrauet/ltx-desktop-macos/commit/51bc47296040276779793b009bbc19571fbc4f3b))
+* **generation:** Prompt Relay shots, video-only output, TeaCache ([74bb64f](https://github.com/dgrauet/ltx-desktop-macos/commit/74bb64fa5ddfc940b996fed047725716daa78ca4))
+* LTX-2.5 support (local packs, auto duration, keyframe slots, family gating) ([0e04285](https://github.com/dgrauet/ltx-desktop-macos/commit/0e042857e0115731e29422f9a4efd5122a566c3c))
+* **models:** LTX-2.5 catalog, local model packs, per-family capabilities ([2662884](https://github.com/dgrauet/ltx-desktop-macos/commit/2662884a3cc7037f6c2f64e97e87653f4ad4b1c5))
+* negative prompt + real training loss curve (J2) ([c5a2673](https://github.com/dgrauet/ltx-desktop-macos/commit/c5a2673d0e1e2cb66a25ee1838c23a9fa14f2282))
+* progressive diffusion previews + per-pass ETA ([78ea012](https://github.com/dgrauet/ltx-desktop-macos/commit/78ea0121f6eddbaad377fd0b1be776e3094e7ecf))
+* Prompt Relay shots, video-only output, TeaCache ([a641fcd](https://github.com/dgrauet/ltx-desktop-macos/commit/a641fcdd0f74885d2ded6fb7c581e55a9d2be29c))
+* **training:** real per-step loss curve ([937ee5b](https://github.com/dgrauet/ltx-desktop-macos/commit/937ee5b2bff13cab4abeaa0938a9a12db45e9ed3))
+* **ui:** LTX-2.5 options, local model folders, family-aware panels ([2f766df](https://github.com/dgrauet/ltx-desktop-macos/commit/2f766df8b63edddffda48518918f70ceb6e386bf))
+* video editor and projects (J3) ([48284cb](https://github.com/dgrauet/ltx-desktop-macos/commit/48284cbeb8d644b4c5109489a8ef711e28e1f0f7))
+
+
+### Bug Fixes
+
+* **api:** run extend on the user-selected video model ([fc5fd70](https://github.com/dgrauet/ltx-desktop-macos/commit/fc5fd70f374905aa49040e0823a714e6a9c7719b))
+* **app:** stop the backend when the app quits ([5f3a4df](https://github.com/dgrauet/ltx-desktop-macos/commit/5f3a4df34442e9e7ae52d737118c688d14ac018d))
+* **engine:** bind pipeline constructor kwargs to the lib signatures ([624272d](https://github.com/dgrauet/ltx-desktop-macos/commit/624272dd7417422b8df2370c1a1d1da823c7b550))
+* **extend:** convert pixel extension frames to latent frames ([10d1e17](https://github.com/dgrauet/ltx-desktop-macos/commit/10d1e17f667f361e4e5e037da28ec6c62b2be3f9))
+* migrate to ltx-2-mlx 0.15.10 / mlx 0.32.2; fix retake & extend ([a009f4f](https://github.com/dgrauet/ltx-desktop-macos/commit/a009f4f113263e0023631967c4a4176a64b4c7a2))
+* **progress:** number denoise stages when a sampler breaks early ([31ede89](https://github.com/dgrauet/ltx-desktop-macos/commit/31ede89d52381d5afec68d21116af7b4381be96d))
+* **ui:** say that a custom negative prompt replaces the default ([e9cd4fa](https://github.com/dgrauet/ltx-desktop-macos/commit/e9cd4faa95eb3c6853cad369128b6d98a11a0504))
+
 ## [0.2.1](https://github.com/dgrauet/ltx-desktop-macos/compare/v0.2.0...v0.2.1) (2026-06-30)
 
 
