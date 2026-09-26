@@ -228,6 +228,9 @@ struct GenerationView: View {
                                 Text("One Stage (dev)").tag("one-stage")
                                 Text("Two Stage (dev + upscale)").tag("two-stage")
                                 Text("Two Stage HQ").tag("two-stage-hq")
+                                if vm.isLTX25 {
+                                    Text("DFR — max detail (experimental)").tag("dfr")
+                                }
                             }
                             .pickerStyle(.menu)
                         }
@@ -301,7 +304,7 @@ struct GenerationView: View {
 
                 // Guidance scale (CFG) — dev/two-stage pipelines and A2V use CFG;
                 // the distilled pipeline ignores it.
-                if vm.pipelineType != "distilled" || vm.sourceAudioPath != nil || vm.controlVideoPath != nil {
+                if (vm.pipelineType != "distilled" && vm.pipelineType != "dfr") || vm.sourceAudioPath != nil || vm.controlVideoPath != nil {
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
                             Text("Guidance")
@@ -604,19 +607,38 @@ struct GenerationView: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            HStack {
-                Text("Keyframe slots")
-                    .font(.subheadline)
-                Spacer()
-                Stepper(value: $vm.generatedKeyframes, in: 0...4) {
-                    Text("\(vm.generatedKeyframes)")
-                        .monospacedDigit()
+            if vm.isDFR {
+                Toggle("Full-res spatial pass", isOn: $vm.dfrSpatialX2)
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                HStack {
+                    Text("Temporal rounds")
+                        .font(.subheadline)
+                    Spacer()
+                    Stepper(value: $vm.dfrTemporalRounds, in: 0...2) {
+                        Text("\(vm.dfrTemporalRounds) → \(vm.fps << vm.dfrTemporalRounds) fps")
+                            .monospacedDigit()
+                    }
                 }
+                Text("Each temporal round doubles the output frame rate. Rounds and the spatial pass can't be combined with Shots, and add a lot of time.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                HStack {
+                    Text("Keyframe slots")
+                        .font(.subheadline)
+                    Spacer()
+                    Stepper(value: $vm.generatedKeyframes, in: 0...4) {
+                        Text("\(vm.generatedKeyframes)")
+                            .monospacedDigit()
+                    }
+                }
+                Text("Extra generated keyframes for fast motion. Each slot costs one latent frame of compute.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            Text("Extra generated keyframes for fast motion. Each slot costs one latent frame of compute.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
 
             HStack {
                 Text("Decoder")
@@ -1302,6 +1324,8 @@ struct GenerationView: View {
             return "Dev model + CFG (30 steps), then neural upscale + refinement. Better quality, slower."
         case "two-stage-hq":
             return "HQ res_2s sampler (15 steps) + refinement. Best quality, slowest."
+        case "dfr":
+            return "LTX-2.5 diffusion fidelity rendering: distilled flow + detailing IC-LoRA (gated download). Sharpest, slowest."
         default:
             return "Distilled model (8+3 steps), half-res + neural upscale. Fastest, good quality."
         }

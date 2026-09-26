@@ -114,7 +114,9 @@ class T2VRequest(BaseModel):
     seed: int = Field(default=-1, description="Random seed (-1 for random)")
     guidance_scale: float = Field(default=3.0, ge=0.0, le=20.0)
     fps: int = Field(default=24, ge=1, le=60)
-    pipeline_type: str = Field(default="distilled", pattern="^(distilled|one-stage|two-stage|two-stage-hq)$")
+    pipeline_type: str = Field(
+        default="distilled", pattern="^(distilled|one-stage|two-stage|two-stage-hq|dfr)$",
+    )
     low_ram: bool = Field(default=False, description="Stream DiT blocks from disk (less RAM)")
     lora_ids: list[str] = Field(default=[], description="LoRA IDs to apply (empty = use active LoRAs)")
     # LTX-2.5 only (400 on 2.3 models)
@@ -124,6 +126,10 @@ class T2VRequest(BaseModel):
     # Prompt Relay: local prompts gated to even slices of the timeline (global prompt still applies)
     segments: list[str] = Field(default=[], max_length=8)
     generate_audio: bool = Field(default=True, description="False = video only (skip audio decode)")
+    # DFR (pipeline_type="dfr", LTX-2.5): spatial 2 = full-res epilogue;
+    # temporal N = N x2 rounds (output fps = fps * 2**N)
+    dfr_spatial_upscalings: int = Field(default=1, ge=1, le=2)
+    dfr_temporal_upscalings: int = Field(default=0, ge=0, le=2)
     enable_teacache: bool = Field(default=False, description="~1.5x stage 1 on two-stage pipelines")
     negative_prompt: str | None = Field(
         default=None, max_length=2000, description="Steer away from this (CFG pipelines; None = lib default)",
@@ -141,7 +147,9 @@ class I2VRequest(BaseModel):
     seed: int = Field(default=-1, description="Random seed (-1 for random)")
     guidance_scale: float = Field(default=3.0, ge=0.0, le=20.0)
     fps: int = Field(default=24, ge=1, le=60)
-    pipeline_type: str = Field(default="distilled", pattern="^(distilled|one-stage|two-stage|two-stage-hq)$")
+    pipeline_type: str = Field(
+        default="distilled", pattern="^(distilled|one-stage|two-stage|two-stage-hq|dfr)$",
+    )
     low_ram: bool = Field(default=False, description="Stream DiT blocks from disk (less RAM)")
     image_strength: float = Field(default=1.0, ge=0.0, le=1.0)
     lora_ids: list[str] = Field(default=[], description="LoRA IDs to apply (empty = use active LoRAs)")
@@ -152,6 +160,10 @@ class I2VRequest(BaseModel):
     # Prompt Relay: local prompts gated to even slices of the timeline (global prompt still applies)
     segments: list[str] = Field(default=[], max_length=8)
     generate_audio: bool = Field(default=True, description="False = video only (skip audio decode)")
+    # DFR (pipeline_type="dfr", LTX-2.5): spatial 2 = full-res epilogue;
+    # temporal N = N x2 rounds (output fps = fps * 2**N)
+    dfr_spatial_upscalings: int = Field(default=1, ge=1, le=2)
+    dfr_temporal_upscalings: int = Field(default=0, ge=0, le=2)
     enable_teacache: bool = Field(default=False, description="~1.5x stage 1 on two-stage pipelines")
     negative_prompt: str | None = Field(
         default=None, max_length=2000, description="Steer away from this (CFG pipelines; None = lib default)",
@@ -896,7 +908,14 @@ def _apply_family_rules(req: T2VRequest | I2VRequest) -> None:
         raise HTTPException(status_code=400, detail="Auto duration requires an LTX-2.5 model")
     if req.generated_keyframes and not caps["generated_keyframes"]:
         raise HTTPException(status_code=400, detail="Keyframe slots require an LTX-2.5 model")
-    if req.negative_prompt is not None and req.pipeline_type == "distilled":
+    if req.pipeline_type == "dfr":
+        if not caps["dfr"]:
+            raise HTTPException(status_code=400, detail="DFR requires an LTX-2.5 model")
+        if req.generated_keyframes:
+            raise HTTPException(status_code=400, detail="DFR places its own keyframe slots")
+        if req.segments and (req.dfr_temporal_upscalings or req.dfr_spatial_upscalings == 2):
+            raise HTTPException(status_code=400, detail="Shots don't work with DFR upscaling rounds")
+    if req.negative_prompt is not None and req.pipeline_type in ("distilled", "dfr"):
         raise HTTPException(
             status_code=400, detail="Negative prompts need a CFG pipeline (one-stage, two-stage or HQ)",
         )
@@ -977,14 +996,21 @@ async def generate_i2v(req: I2VRequest, priority: str = "normal"):
     )
 
 
+def _output_fps(req: T2VRequest | I2VRequest) -> int:
+    """DFR temporal rounds double the frame rate per round."""
+    if req.pipeline_type == "dfr":
+        return req.fps * 2 ** req.dfr_temporal_upscalings
+    return req.fps
+
+
 def _history_frames(output_path: str, req: T2VRequest | I2VRequest) -> int:
     """Frame count for history; auto-duration clips are probed since the model picked the length."""
-    if not req.auto_duration:
+    if not req.auto_duration and not (req.pipeline_type == "dfr" and req.dfr_temporal_upscalings):
         return req.num_frames
     try:
         from engine.ffmpeg_utils import probe_video_info
         _, _, duration = probe_video_info(output_path)
-        return round(duration * req.fps)
+        return round(duration * _output_fps(req))
     except Exception:
         return req.num_frames
 
@@ -1013,6 +1039,8 @@ async def _run_t2v(job_id: str, req: T2VRequest) -> None:
             lora_args=_resolve_lora_args(req.lora_ids),
             model_repo_id=selected_video_model,
             negative_prompt=req.negative_prompt,
+            dfr_spatial_upscalings=req.dfr_spatial_upscalings,
+            dfr_temporal_upscalings=req.dfr_temporal_upscalings,
             auto_duration=req.auto_duration,
             generated_keyframes=req.generated_keyframes,
             video_decoder=req.video_decoder,
@@ -1041,7 +1069,7 @@ async def _run_t2v(job_id: str, req: T2VRequest) -> None:
             width=req.width,
             height=req.height,
             num_frames=_history_frames(result.output_path, req),
-            fps=req.fps,
+            fps=_output_fps(req),
             seed=resolved_seed,
             generation_type="t2v",
         )
@@ -1084,6 +1112,8 @@ async def _run_i2v(job_id: str, req: I2VRequest) -> None:
             lora_args=_resolve_lora_args(req.lora_ids),
             model_repo_id=selected_video_model,
             negative_prompt=req.negative_prompt,
+            dfr_spatial_upscalings=req.dfr_spatial_upscalings,
+            dfr_temporal_upscalings=req.dfr_temporal_upscalings,
             auto_duration=req.auto_duration,
             generated_keyframes=req.generated_keyframes,
             video_decoder=req.video_decoder,
@@ -1112,7 +1142,7 @@ async def _run_i2v(job_id: str, req: I2VRequest) -> None:
             width=req.width,
             height=req.height,
             num_frames=_history_frames(result.output_path, req),
-            fps=req.fps,
+            fps=_output_fps(req),
             seed=resolved_seed,
             generation_type="i2v",
         )

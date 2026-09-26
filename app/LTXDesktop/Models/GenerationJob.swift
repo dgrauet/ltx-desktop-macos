@@ -22,6 +22,8 @@ struct T2VRequest: Codable {
     var enableTeacache: Bool = false
     /// nil = the lib's default negative prompt (omitted from the JSON)
     var negativePrompt: String? = nil
+    var dfrSpatialUpscalings: Int = 1
+    var dfrTemporalUpscalings: Int = 0
 
     enum CodingKeys: String, CodingKey {
         case prompt, width, height, steps, seed, fps
@@ -37,6 +39,8 @@ struct T2VRequest: Codable {
         case generateAudio = "generate_audio"
         case enableTeacache = "enable_teacache"
         case negativePrompt = "negative_prompt"
+        case dfrSpatialUpscalings = "dfr_spatial_upscalings"
+        case dfrTemporalUpscalings = "dfr_temporal_upscalings"
     }
 }
 
@@ -65,6 +69,8 @@ struct I2VRequest: Codable {
     var enableTeacache: Bool = false
     /// nil = the lib's default negative prompt (omitted from the JSON)
     var negativePrompt: String? = nil
+    var dfrSpatialUpscalings: Int = 1
+    var dfrTemporalUpscalings: Int = 0
 
     enum CodingKeys: String, CodingKey {
         case prompt, width, height, steps, seed, fps
@@ -82,6 +88,8 @@ struct I2VRequest: Codable {
         case generateAudio = "generate_audio"
         case enableTeacache = "enable_teacache"
         case negativePrompt = "negative_prompt"
+        case dfrSpatialUpscalings = "dfr_spatial_upscalings"
+        case dfrTemporalUpscalings = "dfr_temporal_upscalings"
     }
 }
 

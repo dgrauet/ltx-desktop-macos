@@ -21,7 +21,7 @@ Native macOS app replicating **LTX Desktop** (Lightricks) with **100% local infe
 
 ### LTX-2.5 (supported since 2026-09-24, ltx-2-mlx ≥0.15)
 - 22B DiT, joint audio+video; **Gemma 4 12B text encoder embedded in the pack** (`gemma_model_id` ignored). Pack family auto-detected (`embedded_config.json` → `transformer.ff_bias: false`) — `engine/model_family.py` mirrors the lib's `is_ltx25_pack` without importing MLX.
-- New: native multishot (write shots in order in one prompt), **auto-duration** DurationHead (`num_frames=AutoDuration`, 1–20 s), **generated keyframe slots** (`generated_keyframes`, fast motion), **diffusion video decoder** (`pipe.video_decoder="diffusion"`, experimental, ~22 GB at 1152×768×25). DFR not wired (experimental, extra gated download).
+- New: native multishot (write shots in order in one prompt), **auto-duration** DurationHead (`num_frames=AutoDuration`, 1–20 s), **generated keyframe slots** (`generated_keyframes`, fast motion), **diffusion video decoder** (`pipe.video_decoder="diffusion"`, experimental, ~22 GB at 1152×768×25), **DFR** (`pipeline_type="dfr"`, lib `DFRPipeline`, experimental "max detail": distilled flow + gated detailing IC-LoRA `Lightricks/LTX-2.5-22b-IC-LoRA-Pixel-Spatial-Upscaler`, optional full-res spatial pass and 0–2 temporal ×2 rounds → output fps × 2ⁿ; no CFG/negative/TeaCache/keyframe slots; Shots incompatible with rounds).
 - **Not on 2.5**: IC-LoRA, TeaCache, LoRA training (trainer 2.3-only), and any library LoRA (all target 2.3). The API returns 400; the UI hides them. Prompt enhancement still works (the app uses a standalone Gemma 3).
 - q8 transformer ≈ 19 GB → **low-RAM streaming forced on Macs < 64 GB** (`_apply_family_rules`). Verified 32 GB: q4 distilled 768×512×25 in ~2 min.
 - HF repos `dgrauet/ltx-2.5-mlx-q8` (~75 GB) / `-q4` (~47 GB) are **gated** (token + licence). Existing packs can be registered as **local models** (`POST /api/v1/models/local`, stored in `~/.ltx-desktop/local_models.json`; never deleted from disk).
@@ -104,6 +104,8 @@ FastAPI in separate process for: crash isolation (OOM kills backend, not UI), GI
 - Pure logic lives in `app/LTXEditorCore` (SwiftPM, Foundation only): **`cd app/LTXEditorCore && swift test`**. The app target compiles the same files (pbxproj file refs) — no package dependency.
 - Composition gotchas: video-composition instructions must cover the whole duration (black tail instruction when music outlasts video); one composition audio track per music clip (`insertTimeRange` shifts content).
 - Fixed: the app never stopped its backend on quit (orphaned uvicorn on :8000) — `ProcessManager` now stops it on `willTerminate`.
+
+**DONE (ltx-2-mlx 0.15.10 + DFR, 2026-09-26):** lib bumped (A2V/retake frozen streams at sigma 0 like upstream, IC-LoRA reference positions follow fps, DFR temporal/spatial rounds + keyframe-aware decode); real A2V + retake re-verified. DFR exposed as a 2.5-only pipeline.
 
 **REMAINING:**
 - **2× pixel upscale (ffmpeg lanczos)** — not implemented in backend (no lanczos/scale filter or endpoint). Note: the lib's two-stage pipeline has a *neural* upscaler, which is different

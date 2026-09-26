@@ -81,10 +81,15 @@ class GenerationViewModel: ObservableObject {
     @Published var enableTeacache = false
     /// Empty = the model's default negative prompt.
     @Published var negativePrompt = ""
+    // DFR (LTX-2.5 max-detail pipeline)
+    @Published var dfrSpatialX2 = false
+    @Published var dfrTemporalRounds = 0
+
+    var isDFR: Bool { isLTX25 && pipelineType == "dfr" }
 
     /// Negative prompts only affect CFG pipelines (dev pipelines and A2V), not distilled.
     var negativePromptApplies: Bool {
-        controlVideoPath == nil && (sourceAudioPath != nil || pipelineType != "distilled")
+        controlVideoPath == nil && (sourceAudioPath != nil || (pipelineType != "distilled" && pipelineType != "dfr"))
     }
 
     /// Value sent to the backend: nil keeps the model default.
@@ -299,12 +304,14 @@ class GenerationViewModel: ObservableObject {
                     imageStrength: imageStrength,
                     loraIds: isLTX25 ? [] : selectedLoRAIdArray,
                     autoDuration: isLTX25 && autoDuration,
-                    generatedKeyframes: isLTX25 ? generatedKeyframes : 0,
+                    generatedKeyframes: isLTX25 && !isDFR ? generatedKeyframes : 0,
                     videoDecoder: isLTX25 ? videoDecoder : "conv",
                     segments: activeSegments,
                     generateAudio: generateAudio,
                     enableTeacache: teacacheAvailable && enableTeacache,
-                    negativePrompt: effectiveNegativePrompt
+                    negativePrompt: effectiveNegativePrompt,
+                    dfrSpatialUpscalings: isDFR && dfrSpatialX2 ? 2 : 1,
+                    dfrTemporalUpscalings: isDFR ? dfrTemporalRounds : 0
                 )
                 submitResponse = try await service.generateImageToVideo(request: request, priority: priority)
             } else {
@@ -321,12 +328,14 @@ class GenerationViewModel: ObservableObject {
                     lowRam: lowRam,
                     loraIds: isLTX25 ? [] : selectedLoRAIdArray,
                     autoDuration: isLTX25 && autoDuration,
-                    generatedKeyframes: isLTX25 ? generatedKeyframes : 0,
+                    generatedKeyframes: isLTX25 && !isDFR ? generatedKeyframes : 0,
                     videoDecoder: isLTX25 ? videoDecoder : "conv",
                     segments: activeSegments,
                     generateAudio: generateAudio,
                     enableTeacache: teacacheAvailable && enableTeacache,
-                    negativePrompt: effectiveNegativePrompt
+                    negativePrompt: effectiveNegativePrompt,
+                    dfrSpatialUpscalings: isDFR && dfrSpatialX2 ? 2 : 1,
+                    dfrTemporalUpscalings: isDFR ? dfrTemporalRounds : 0
                 )
                 submitResponse = try await service.generateTextToVideo(request: request, priority: priority)
             }
@@ -548,6 +557,9 @@ class GenerationViewModel: ObservableObject {
             }
             if isLTX25, controlVideoPath != nil {
                 controlVideoPath = nil  // IC-LoRA is not available on LTX-2.5
+            }
+            if !isLTX25, pipelineType == "dfr" {
+                pipelineType = "distilled"  // DFR is LTX-2.5 only
             }
             availableICLoras = response.models.filter { $0.modelType == "ic-lora" && $0.downloaded }
             // Drop a stale selection if that IC-LoRA is no longer present.
