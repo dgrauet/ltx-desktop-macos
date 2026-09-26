@@ -47,6 +47,7 @@ class ExtendPipeline:
         seed: int = 42,
         fps: int = 24,
         model_repo_id: str | None = None,
+        negative_prompt: str | None = None,
         progress_callback=None,
     ) -> GenerationResult:
         job_id = uuid.uuid4().hex[:8]
@@ -76,6 +77,7 @@ class ExtendPipeline:
             extend_frames=latent_frames,
             extend_direction=lib_direction,
             model_repo_id=model_repo_id,
+            negative_prompt=negative_prompt,
             progress_callback=progress_callback,
         )
 

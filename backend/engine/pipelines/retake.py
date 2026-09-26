@@ -51,6 +51,7 @@ class RetakePipeline:
         seed: int = 42,
         fps: int = 24,
         model_repo_id: str | None = None,
+        negative_prompt: str | None = None,
         progress_callback=None,
     ) -> GenerationResult:
         job_id = uuid.uuid4().hex[:8]
@@ -82,6 +83,7 @@ class RetakePipeline:
             retake_start_frame=start_frame,
             retake_end_frame=end_frame,
             model_repo_id=model_repo_id,
+            negative_prompt=negative_prompt,
             progress_callback=progress_callback,
         )
 

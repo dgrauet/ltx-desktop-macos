@@ -16,6 +16,7 @@ def _args(pipeline_type: str, **over) -> SimpleNamespace:
         height=512, width=768, num_frames=97, fps=24, seed=1, num_steps=8,
         cfg_scale=3.0, stg_scale=1.0, image=None, image_strength=1.0,
         auto_duration=False, generated_keyframes=0, segment=None, enable_teacache=False,
+        negative_prompt=None,
         gemma=None, low_ram=False, ic_lora=None,
     )
     base.update(over)

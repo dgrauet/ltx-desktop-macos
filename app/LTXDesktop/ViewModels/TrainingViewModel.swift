@@ -31,6 +31,15 @@ final class TrainingViewModel: ObservableObject {
     @Published var liveStep: Int = 0
     @Published var liveTotal: Int = 0
     @Published var livePeakGb: Double = 0
+    /// Per-optimizer-step training loss of the current run, for the loss curve.
+    @Published var lossHistory: [LossPoint] = []
+    @Published var liveLr: Double = 0
+
+    struct LossPoint: Identifiable {
+        let step: Int
+        let loss: Double
+        var id: Int { step }
+    }
     @Published var isTraining: Bool = false
 
     // MARK: - Preflight
@@ -211,11 +220,12 @@ final class TrainingViewModel: ObservableObject {
             seed: nil
         )
 
-        // Store the submitted step count before we start, so progress can be computed
-        // from it — the backend's step events carry total=0.
+        // Store the submitted step count before we start, so progress shows before the first step event.
         liveTotal = steps
         liveStep = 0
         livePeakGb = 0
+        lossHistory = []
+        liveLr = 0
         liveStatus = "Starting…"
         isTraining = true
         errorMessage = nil
@@ -230,12 +240,17 @@ final class TrainingViewModel: ObservableObject {
                 case .status(let message):
                     liveStatus = message
 
-                case .step(let stepNum, _, let peakMem):
-                    // Ignore the event's `total` — it is always 0 from the backend.
-                    // Use liveTotal set from the submitted config's `steps`.
+                case .step(let stepNum, let total, let loss, let lr, let peakMem):
+                    if total > 0 { liveTotal = total }
                     liveStep = stepNum
                     livePeakGb = peakMem
-                    liveStatus = "Step \(stepNum) / \(liveTotal)"
+                    liveLr = lr
+                    if loss.isFinite {
+                        lossHistory.append(LossPoint(step: stepNum, loss: loss))
+                        liveStatus = String(format: "Step %d / %d · loss %.4f", stepNum, liveTotal, loss)
+                    } else {
+                        liveStatus = "Step \(stepNum) / \(liveTotal)"
+                    }
 
                 case .sample:
                     // Sample preview path — no action needed at VM level.

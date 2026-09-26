@@ -50,6 +50,7 @@ class AudioToVideoPipeline:
         low_ram: bool = False,
         lora_args: list[str] | None = None,
         model_repo_id: str | None = None,
+        negative_prompt: str | None = None,
         progress_callback: Callable[[int, int, float, str | None], None] | None = None,
     ) -> GenerationResult:
         """Run the A2V generation pipeline.
@@ -129,6 +130,7 @@ class AudioToVideoPipeline:
             lora_args=lora_args,
             progress_callback=_progress_adapter,
             model_repo_id=model_repo_id,
+            negative_prompt=negative_prompt,
         )
 
         stages["generation"] = time.monotonic() - t0

@@ -125,6 +125,9 @@ class T2VRequest(BaseModel):
     segments: list[str] = Field(default=[], max_length=8)
     generate_audio: bool = Field(default=True, description="False = video only (skip audio decode)")
     enable_teacache: bool = Field(default=False, description="~1.5x stage 1 on two-stage pipelines")
+    negative_prompt: str | None = Field(
+        default=None, max_length=2000, description="Steer away from this (CFG pipelines; None = lib default)",
+    )
 
 
 class I2VRequest(BaseModel):
@@ -150,6 +153,9 @@ class I2VRequest(BaseModel):
     segments: list[str] = Field(default=[], max_length=8)
     generate_audio: bool = Field(default=True, description="False = video only (skip audio decode)")
     enable_teacache: bool = Field(default=False, description="~1.5x stage 1 on two-stage pipelines")
+    negative_prompt: str | None = Field(
+        default=None, max_length=2000, description="Steer away from this (CFG pipelines; None = lib default)",
+    )
 
 
 class A2VRequest(BaseModel):
@@ -170,6 +176,9 @@ class A2VRequest(BaseModel):
     audio_start: float = Field(default=0.0, ge=0.0, description="Audio start time in seconds")
     low_ram: bool = Field(default=False, description="Stream DiT blocks from disk (less RAM)")
     lora_ids: list[str] = Field(default=[], description="LoRA IDs to apply (empty = use active LoRAs)")
+    negative_prompt: str | None = Field(
+        default=None, max_length=2000, description="Steer away from this (CFG pipelines; None = lib default)",
+    )
 
 
 class ICLoraRequest(BaseModel):
@@ -218,6 +227,9 @@ class RetakeRequest(BaseModel):
     steps: int = Field(default=8, ge=1, le=50)
     seed: int = Field(default=-1, description="Random seed (-1 for random)")
     fps: int = Field(default=24, ge=1, le=60)
+    negative_prompt: str | None = Field(
+        default=None, max_length=2000, description="Steer away from this (CFG pipelines; None = lib default)",
+    )
 
 
 class ExtendRequest(BaseModel):
@@ -229,6 +241,9 @@ class ExtendRequest(BaseModel):
     steps: int = Field(default=8, ge=1, le=50)
     seed: int = Field(default=-1, description="Random seed (-1 for random)")
     fps: int = Field(default=24, ge=1, le=60)
+    negative_prompt: str | None = Field(
+        default=None, max_length=2000, description="Steer away from this (CFG pipelines; None = lib default)",
+    )
 
 
 class QueueSubmitResponse(BaseModel):
@@ -881,6 +896,10 @@ def _apply_family_rules(req: T2VRequest | I2VRequest) -> None:
         raise HTTPException(status_code=400, detail="Auto duration requires an LTX-2.5 model")
     if req.generated_keyframes and not caps["generated_keyframes"]:
         raise HTTPException(status_code=400, detail="Keyframe slots require an LTX-2.5 model")
+    if req.negative_prompt is not None and req.pipeline_type == "distilled":
+        raise HTTPException(
+            status_code=400, detail="Negative prompts need a CFG pipeline (one-stage, two-stage or HQ)",
+        )
     if any(not s.strip() for s in req.segments):
         raise HTTPException(status_code=400, detail="Prompt Relay segments must not be empty")
     if req.enable_teacache:
@@ -993,6 +1012,7 @@ async def _run_t2v(job_id: str, req: T2VRequest) -> None:
             low_ram=req.low_ram,
             lora_args=_resolve_lora_args(req.lora_ids),
             model_repo_id=selected_video_model,
+            negative_prompt=req.negative_prompt,
             auto_duration=req.auto_duration,
             generated_keyframes=req.generated_keyframes,
             video_decoder=req.video_decoder,
@@ -1063,6 +1083,7 @@ async def _run_i2v(job_id: str, req: I2VRequest) -> None:
             image_strength=req.image_strength,
             lora_args=_resolve_lora_args(req.lora_ids),
             model_repo_id=selected_video_model,
+            negative_prompt=req.negative_prompt,
             auto_duration=req.auto_duration,
             generated_keyframes=req.generated_keyframes,
             video_decoder=req.video_decoder,
@@ -1159,6 +1180,7 @@ async def _run_a2v(job_id: str, req: A2VRequest) -> None:
             low_ram=req.low_ram,
             lora_args=_resolve_lora_args(req.lora_ids),
             model_repo_id=selected_video_model,
+            negative_prompt=req.negative_prompt,
             progress_callback=progress_cb,
         )
         jobs[job_id]["status"] = "completed"
@@ -1337,6 +1359,7 @@ async def _run_retake(job_id: str, req: RetakeRequest) -> None:
             seed=_resolve_seed(req.seed),
             fps=req.fps,
             model_repo_id=selected_video_model,
+            negative_prompt=req.negative_prompt,
             progress_callback=progress_cb,
         )
         jobs[job_id]["status"] = "completed"
@@ -1396,6 +1419,7 @@ async def _run_extend(job_id: str, req: ExtendRequest) -> None:
             seed=_resolve_seed(req.seed),
             fps=req.fps,
             model_repo_id=selected_video_model,
+            negative_prompt=req.negative_prompt,
             progress_callback=progress_cb,
         )
         jobs[job_id]["status"] = "completed"
@@ -2131,6 +2155,8 @@ async def _training_supervisor(
                     stderr_tail.pop(0)
                 evt = _proto.parse_line(line)
                 if evt:
+                    if evt["type"] == "step":
+                        evt["total"] = steps
                     if evt["type"] == "step" and evt.get("peak_mem_gb", 0) > peak_mem_gb:
                         peak_mem_gb = evt["peak_mem_gb"]
                         training_store.update_run(run_id, peak_mem_gb=peak_mem_gb)
