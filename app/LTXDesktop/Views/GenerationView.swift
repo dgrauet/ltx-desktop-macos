@@ -1224,7 +1224,7 @@ struct GenerationView: View {
                         .resizable()
                         .aspectRatio(contentMode: .fit)
                         .clipShape(RoundedRectangle(cornerRadius: 12))
-                    Text("Generating...")
+                    Text(vm.statusMessage ?? "Generating...")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
