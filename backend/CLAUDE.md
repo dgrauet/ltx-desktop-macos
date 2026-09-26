@@ -134,7 +134,7 @@ backend/
 ## Dependencies
 
 See `pyproject.toml`. Key packages:
-- `mlx>=0.32.2`, `ltx-core-mlx` / `ltx-pipelines-mlx` / `ltx-trainer-mlx` 0.15.9 (git: dgrauet/ltx-2-mlx, pinned to tag `v0.15.9` — bump the tag explicitly)
+- `mlx>=0.32.2`, `ltx-core-mlx` / `ltx-pipelines-mlx` / `ltx-trainer-mlx` 0.15.10 (git: dgrauet/ltx-2-mlx, pinned to tag `v0.15.10` — bump the tag explicitly)
 - lib 0.14+ API: `frame_rate=` keyword obligatoire sur tous les `generate*`; classes `DistilledPipeline` / `TI2VidOneStagePipeline` / `TI2VidTwoStagesPipeline` / `TI2VidTwoStagesHQPipeline` / `RetakePipeline` (extend inclus); I2V via `image=` sur tous les pipelines
 - `fastapi>=0.115.0`, `uvicorn>=0.32.0`, `websockets>=13.0`
 - `safetensors>=0.4.0`, `transformers>=4.51.0`, `huggingface-hub>=0.26.0`

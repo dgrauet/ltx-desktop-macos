@@ -14,7 +14,7 @@ Native macOS app replicating **LTX Desktop** (Lightricks) with **100% local infe
 - **Tested resolutions**: up to 1280×704 on 32GB. 1920×1080 selectable in UI but untested on 32GB (likely OOMs)
 - **FPS**: 24 (distilled model)
 - **Audio**: built-in vocoder, synchronized generation (output noisy — quality issue)
-- **Variants**: dev (CFG, 30 steps) and distilled (8+3 steps) — both supported by ltx-pipelines-mlx ≥0.14 (app pinned to 0.15.9). MLX repos ship both transformers: `dgrauet/ltx-2.3-mlx` (bf16 ~42GB), `-q8` (~21GB), `-q4` (~12GB).
+- **Variants**: dev (CFG, 30 steps) and distilled (8+3 steps) — both supported by ltx-pipelines-mlx ≥0.14 (app pinned to 0.15.10). MLX repos ship both transformers: `dgrauet/ltx-2.3-mlx` (bf16 ~42GB), `-q8` (~21GB), `-q4` (~12GB).
 - **Text encoder**: Gemma 3 12B (for video generation AND prompt enhancement via ltx-core-mlx)
 - **VAE**: rebuilt for 2.3, better texture preservation
 - **HuggingFace**: `Lightricks/LTX-2.3`, pre-converted MLX: `dgrauet/ltx-2.3-mlx-q8`
@@ -28,7 +28,7 @@ Native macOS app replicating **LTX Desktop** (Lightricks) with **100% local infe
 
 ### MLX on Apple Silicon
 - Unified CPU/GPU memory — no data copying
-- Key packages: `mlx`, `ltx-core-mlx`, `ltx-pipelines-mlx`, `ltx-trainer-mlx` (all pinned to tag `v0.15.9` of the [ltx-2-mlx](https://github.com/dgrauet/ltx-2-mlx) monorepo); `mlx>=0.32.2`
+- Key packages: `mlx`, `ltx-core-mlx`, `ltx-pipelines-mlx`, `ltx-trainer-mlx` (all pinned to tag `v0.15.10` of the [ltx-2-mlx](https://github.com/dgrauet/ltx-2-mlx) monorepo); `mlx>=0.32.2`
 - Weight conversion: PyTorch → MLX via [mlx-forge](https://github.com/dgrauet/mlx-forge) (`mlx-forge convert ltx-2.3`)
 - Quantization: int4, int8 support
 
@@ -113,7 +113,7 @@ FastAPI in separate process for: crash isolation (OOM kills backend, not UI), GI
 - Hardware enforcement — limit resolution/frames based on detected RAM (currently all resolutions selectable)
 - RAM < 32GB warning banner
 - Automated memory actions (auto-pause queue + auto-cleanup on memory pressure **exist**; auto-unload model on idle does not)
-- **Re-pin ltx-2-mlx to a release tag** once PRs #154 (trainer metrics) and #155 (negative prompt) are released — the app currently pins branch `integration/desktop-negprompt-metrics` (commit `3ceaa90`)
+- **Re-pin ltx-2-mlx to a release tag** once PRs #154 (trainer metrics) and #155 (negative prompt) are released — the app currently pins branch `integration/desktop-negprompt-metrics` (commit `940a68d`, = v0.15.10 + #155 + #154)
 - **AV / V2V training** — deferred to P3/P4
 
 > **Roadmap reframing (2026-06-19):** strategic cadrage + verified-state audit live at
