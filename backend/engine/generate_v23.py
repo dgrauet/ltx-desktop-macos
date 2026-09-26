@@ -124,6 +124,7 @@ def resolve_pipeline(args: argparse.Namespace) -> tuple[type, dict]:
         TI2VidTwoStagesHQPipeline,
         TI2VidTwoStagesPipeline,
     )
+    from ltx_pipelines_mlx.dfr import DFRPipeline
 
     common = {
         "gemma_model_id": args.gemma or "mlx-community/gemma-3-12b-it-4bit",
@@ -139,13 +140,20 @@ def resolve_pipeline(args: argparse.Namespace) -> tuple[type, dict]:
         return A2VidPipelineTwoStage, common
     elif args.mode == "ic-lora":
         return ICLoraPipeline, {"lora_paths": _parse_lora_args(args.ic_lora or []), **common}
+    elif pipeline_type == "dfr":
+        # LTX-2.5 "diffusion fidelity rendering": distilled flow + detailing IC-LoRA
+        return DFRPipeline, {
+            **common,
+            "spatial_upscalings": getattr(args, "dfr_spatial_upscalings", 1),
+            "temporal_upscalings": getattr(args, "dfr_temporal_upscalings", 0),
+        }
     elif pipeline_type == "two-stage":
         return TI2VidTwoStagesPipeline, common
     elif pipeline_type == "two-stage-hq":
         return TI2VidTwoStagesHQPipeline, common
     elif pipeline_type == "one-stage":
         return TI2VidOneStagePipeline, common
-    else:  # distilled (fastest, 8+3 steps, no CFG)
+    else:  # distilled / dfr (distilled flow: 8+3 steps, no CFG)
         return DistilledPipeline, common
 
 
@@ -488,7 +496,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--fps", type=int, default=24)
     parser.add_argument("--num-steps", type=int, default=8)
     parser.add_argument("--pipeline-type",
-                        choices=["distilled", "one-stage", "two-stage", "two-stage-hq"],
+                        choices=["distilled", "one-stage", "two-stage", "two-stage-hq", "dfr"],
                         default="distilled", help="Pipeline variant")
     parser.add_argument("--cfg-scale", type=float, default=3.0,
                         help="CFG guidance scale (ignored by distilled)")
@@ -549,6 +557,12 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="Skip audio decode and mux (video only)")
     parser.add_argument("--enable-teacache", action="store_true",
                         help="TeaCache stage-1 acceleration (two-stage pipelines, LTX-2.3)")
+
+    # DFR (LTX-2.5, --pipeline-type dfr)
+    parser.add_argument("--dfr-spatial-upscalings", type=int, choices=[1, 2], default=1,
+                        help="2 = quarter-res stage 1 and a full-res spatial epilogue")
+    parser.add_argument("--dfr-temporal-upscalings", type=int, choices=[0, 1, 2], default=0,
+                        help="Temporal x2 rounds; output fps = fps * 2**N")
 
     # Progressive preview
     parser.add_argument("--preview-dir", default=None,

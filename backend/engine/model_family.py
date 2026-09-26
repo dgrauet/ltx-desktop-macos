@@ -21,6 +21,8 @@ _CONFIG_FILES = ("embedded_config.json", "config.json")
 #   can import or train targets 2.3 (different latent space — never apply to 2.5).
 # - auto-duration (DurationHead), generated keyframe slots and the diffusion
 #   video decoder only exist on 2.5 packs.
+# - DFR (diffusion fidelity rendering, experimental) is 2.5-only; it needs the
+#   gated Lightricks/LTX-2.5-22b-IC-LoRA-Pixel-Spatial-Upscaler detailing LoRA.
 # - prompt enhancement runs a standalone Gemma 3 in the app, so it works for both.
 _CAPABILITIES: dict[str, dict[str, bool]] = {
     FAMILY_23: {
@@ -32,6 +34,7 @@ _CAPABILITIES: dict[str, dict[str, bool]] = {
         "auto_duration": False,
         "generated_keyframes": False,
         "diffusion_decoder": False,
+        "dfr": False,
     },
     FAMILY_25: {
         "enhance": True,
@@ -42,6 +45,7 @@ _CAPABILITIES: dict[str, dict[str, bool]] = {
         "auto_duration": True,
         "generated_keyframes": True,
         "diffusion_decoder": True,
+        "dfr": True,
     },
 }
 

@@ -249,6 +249,8 @@ async def run_mlx_generation(
     generate_audio: bool = True,
     enable_teacache: bool = False,
     negative_prompt: str | None = None,
+    dfr_spatial_upscalings: int = 1,
+    dfr_temporal_upscalings: int = 0,
     progress_callback: Callable[..., Awaitable[None]] | None = None,
     venv_python: str | None = None,
     model_repo_id: str | None = None,
@@ -300,6 +302,11 @@ async def run_mlx_generation(
         cmd.append("--enable-teacache")
     if negative_prompt is not None:
         cmd.extend(["--negative-prompt", negative_prompt])
+    if pipeline_type == "dfr":
+        cmd.extend([
+            "--dfr-spatial-upscalings", str(dfr_spatial_upscalings),
+            "--dfr-temporal-upscalings", str(dfr_temporal_upscalings),
+        ])
 
     # I2V args
     if image:

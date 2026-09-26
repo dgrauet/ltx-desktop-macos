@@ -85,6 +85,19 @@ _KNOWN_MODELS: list[dict[str, Any]] = [
         "gated": True,
     },
     {
+        "id": "ltx-2.5-dfr-detailing-lora",
+        "name": "LTX-2.5 DFR Detailing LoRA",
+        "description": (
+            "Official detailing IC-LoRA used by the experimental DFR pipeline (maximum detail on "
+            "LTX-2.5). Gated: needs an HF token and licence."
+        ),
+        "size_gb": 0.3,
+        "model_type": "upscaler",
+        "hf_repo": "Lightricks/LTX-2.5-22b-IC-LoRA-Pixel-Spatial-Upscaler",
+        "hf_allow_patterns": ["ltx-2.5-22b-ic-lora-pixel-spatial-upscaler-x2-1.0.safetensors"],
+        "gated": True,
+    },
+    {
         "id": "gemma-3-12b-it-4bit",
         "name": "Gemma 3 12B IT (4-bit)",
         "description": (
