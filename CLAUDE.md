@@ -14,7 +14,7 @@ Native macOS app replicating **LTX Desktop** (Lightricks) with **100% local infe
 - **Tested resolutions**: up to 1280×704 on 32GB. 1920×1080 selectable in UI but untested on 32GB (likely OOMs)
 - **FPS**: 24 (distilled model)
 - **Audio**: built-in vocoder, synchronized generation (output noisy — quality issue)
-- **Variants**: dev (CFG, 30 steps) and distilled (8+3 steps) — both supported by ltx-pipelines-mlx ≥0.14 (app pinned to 0.15.10). MLX repos ship both transformers: `dgrauet/ltx-2.3-mlx` (bf16 ~42GB), `-q8` (~21GB), `-q4` (~12GB).
+- **Variants**: dev (CFG, 30 steps) and distilled (8+3 steps) — both supported by ltx-pipelines-mlx ≥0.14 (app pinned to 0.15.11). MLX repos ship both transformers: `dgrauet/ltx-2.3-mlx` (bf16 ~42GB), `-q8` (~21GB), `-q4` (~12GB).
 - **Text encoder**: Gemma 3 12B (for video generation AND prompt enhancement via ltx-core-mlx)
 - **VAE**: rebuilt for 2.3, better texture preservation
 - **HuggingFace**: `Lightricks/LTX-2.3`, pre-converted MLX: `dgrauet/ltx-2.3-mlx-q8`
@@ -28,7 +28,7 @@ Native macOS app replicating **LTX Desktop** (Lightricks) with **100% local infe
 
 ### MLX on Apple Silicon
 - Unified CPU/GPU memory — no data copying
-- Key packages: `mlx`, `ltx-core-mlx`, `ltx-pipelines-mlx`, `ltx-trainer-mlx` (all pinned to tag `v0.15.10` of the [ltx-2-mlx](https://github.com/dgrauet/ltx-2-mlx) monorepo); `mlx>=0.32.2`
+- Key packages: `mlx`, `ltx-core-mlx`, `ltx-pipelines-mlx`, `ltx-trainer-mlx` (all pinned to tag `v0.15.11` of the [ltx-2-mlx](https://github.com/dgrauet/ltx-2-mlx) monorepo); `mlx>=0.32.2`
 - Weight conversion: PyTorch → MLX via [mlx-forge](https://github.com/dgrauet/mlx-forge) (`mlx-forge convert ltx-2.3`)
 - Quantization: int4, int8 support
 
@@ -55,7 +55,7 @@ FastAPI in separate process for: crash isolation (OOM kills backend, not UI), GI
 ### Phase 1 — AI Video Generator (MVP)
 
 **DONE:**
-- ✅ T2V with configurable resolution/frames/FPS/guidance (CFG)/seed — guidance wired end-to-end since J0 (affects dev/two-stage only; distilled ignores CFG). **Negative prompt** (2026-09-24, ltx-2-mlx PR #155) on CFG pipelines (one-stage / two-stage / HQ, A2V, retake, extend): `negative_prompt` omitted = lib `DEFAULT_NEGATIVE_PROMPT`, any string (even "") is used as-is; 400 on distilled
+- ✅ T2V with configurable resolution/frames/FPS/guidance (CFG)/seed — guidance wired end-to-end since J0 (affects dev/two-stage only; distilled ignores CFG). **Negative prompt** (2026-09-24, ltx-2-mlx 0.15.11) on CFG pipelines (one-stage / two-stage / HQ, A2V, retake, extend): `negative_prompt` omitted = lib `DEFAULT_NEGATIVE_PROMPT`, any string (even "") is used as-is; 400 on distilled
 - ✅ Synchronized audio generation in single pass
 - ✅ I2V with reference image (drag & drop), `image_strength` — functional since J0 (passed via `ImageConditioningInput`)
 - ✅ Prompt Enhancement (Gemma 3 12B via ltx-core-mlx)
@@ -85,7 +85,7 @@ FastAPI in separate process for: crash isolation (OOM kills backend, not UI), GI
 - ✅ **Default = normal training** (full bf16 base, no forced batch/grad constraints). **Low-RAM mode is opt-in** (`low_ram=True` in UI toggle): uses q4 quantized base + batch 1 + gradient checkpointing + reduced validation — the right choice on 32GB machines.
 - ✅ **Generation ↔ training exclusion lock** — a `threading.Lock`-guarded `ExclusionLock` (named holder) prevents concurrent GPU use: `/api/v1/generate/*` returns 409 while a training run is active, and vice versa.
 - ✅ **LoRA auto-import** — on run completion the produced `lora_weights_step_NNNNN.safetensors` is imported into `LoRAManager` and appears immediately in the Generation LoRA picker.
-- ✅ **Real per-step loss curve** (2026-09-24) — ltx-trainer-mlx `metrics_callback(StepMetrics)` (ltx-2-mlx PR #154) drives one `STEP:` line per optimizer step with the real loss (mean over grad-accumulation micro-batches) and lr; Training tab shows a raw + moving-average loss chart (Swift Charts). `step_callback` now only reports validation samples.
+- ✅ **Real per-step loss curve** (2026-09-24) — ltx-trainer-mlx `metrics_callback(StepMetrics)` (ltx-2-mlx 0.15.11) drives one `STEP:` line per optimizer step with the real loss (mean over grad-accumulation micro-batches) and lr; Training tab shows a raw + moving-average loss chart (Swift Charts). `step_callback` now only reports validation samples.
 - ✅ **Dependency: ltx-2-mlx 0.14.14** (0.14.13 commit 89dd935 fixed fps→frame_rate ×3, decoder()→.decode(), bf16→f32 PEP3118 during the P0 spike; **0.14.14 commit 6aa09157 fixes LoRA application in `low_ram_streaming`** — without it, LoRAs were silently dropped in Low-RAM mode).
 - ✅ **UI "close other GPU apps" hint** displayed in the Training Config panel — macOS GPU watchdog can SIGKILL sustained Metal work when another GPU/display client holds the GPU.
 - ⚠️ **`mx.get_peak_memory()` NOT surfaced as "RAM needed"** during training — reports ~49.7 GB on a 32GB machine (MLX high-water accounting artifact); actual RSS ~7 GB. Use RSS or system available instead.
@@ -113,7 +113,6 @@ FastAPI in separate process for: crash isolation (OOM kills backend, not UI), GI
 - Hardware enforcement — limit resolution/frames based on detected RAM (currently all resolutions selectable)
 - RAM < 32GB warning banner
 - Automated memory actions (auto-pause queue + auto-cleanup on memory pressure **exist**; auto-unload model on idle does not)
-- **Re-pin ltx-2-mlx to a release tag** once PRs #154 (trainer metrics) and #155 (negative prompt) are released — the app currently pins branch `integration/desktop-negprompt-metrics` (commit `940a68d`, = v0.15.10 + #155 + #154)
 - **AV / V2V training** — deferred to P3/P4
 
 > **Roadmap reframing (2026-06-19):** strategic cadrage + verified-state audit live at
