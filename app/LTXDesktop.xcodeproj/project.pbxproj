@@ -479,7 +479,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.video";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026. All rights reserved.";
-				MARKETING_VERSION = 0.2.1; // x-release-please-version
+				MARKETING_VERSION = 0.2.2; // x-release-please-version
 				PRODUCT_BUNDLE_IDENTIFIER = com.ltxdesktop.macos;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -502,7 +502,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.video";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026. All rights reserved.";
-				MARKETING_VERSION = 0.2.1; // x-release-please-version
+				MARKETING_VERSION = 0.2.2; // x-release-please-version
 				PRODUCT_BUNDLE_IDENTIFIER = com.ltxdesktop.macos;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
