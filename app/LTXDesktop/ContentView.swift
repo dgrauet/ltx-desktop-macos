@@ -6,9 +6,11 @@ struct ContentView: View {
     @StateObject private var queueVM = QueueViewModel()
     @StateObject private var generationVM = GenerationViewModel()
     @StateObject private var trainingVM = TrainingViewModel()
+    @StateObject private var editorVM = EditorViewModel()
 
     enum Tab: String, CaseIterable {
         case generation = "Generation"
+        case editor = "Editor"
         case queue = "Queue"
         case history = "History"
         case controlVideos = "Control Videos"
@@ -49,7 +51,9 @@ struct ContentView: View {
                     } else {
                         switch selectedTab {
                         case .generation:
-                            GenerationView()
+                            GenerationView(onSendToEditor: { selectedTab = .editor })
+                        case .editor:
+                            EditorView()
                         case .queue:
                             QueueView()
                         case .history:
@@ -96,6 +100,7 @@ struct ContentView: View {
         }
         .environmentObject(generationVM)
         .environmentObject(trainingVM)
+        .environmentObject(editorVM)
     }
 
     private var trainingBetaBanner: some View {
@@ -263,6 +268,7 @@ struct ContentView: View {
     private func iconForTab(_ tab: Tab) -> String {
         switch tab {
         case .generation: return "wand.and.sparkles"
+        case .editor: return "film.stack"
         case .queue: return "list.number"
         case .history: return "clock.arrow.circlepath"
         case .controlVideos: return "square.stack.3d.up"

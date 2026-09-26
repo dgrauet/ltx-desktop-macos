@@ -7,6 +7,15 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		B727D078424AFC9C079F05A1 /* TimelineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D959A236620855A5D88384BD /* TimelineView.swift */; };
+		7EF2E5D02ACC461B5EB9DE2E /* EditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1477A30EFBC343ECDAD02B7E /* EditorView.swift */; };
+		46AF54CC19257FEBDC8FEEFD /* EditorViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A1D98CAC533341E264691C8 /* EditorViewModel.swift */; };
+		37853DEE424A72FE8BBDB6B6 /* CompositionBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D72034608EA67602A4D7E16 /* CompositionBuilder.swift */; };
+		71683D978ADBF4B0C0EDAA57 /* FCPXMLWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7924D4C8416BC2FF54B90B0 /* FCPXMLWriter.swift */; };
+		C3C48C279B1981DCE83148EE /* ProjectStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24DD1D9AE882B07A5BAB2433 /* ProjectStore.swift */; };
+		6AB33EB0367EF3920579D980 /* UndoStack.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D1F29CC03C1BA75720B32B0 /* UndoStack.swift */; };
+		C6933DB817BCB0A43CBBEBB3 /* EditorOperations.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAB1F9F662828D602939C5CF /* EditorOperations.swift */; };
+		C03AC61A885F347E5DAE89A2 /* EditorModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F84CAA93C2474C3BC544DB38 /* EditorModel.swift */; };
 		07803A4F16F480E97CF71F03 /* ControlLibraryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8A25FC2B53B43CE6A857797 /* ControlLibraryViewModel.swift */; };
 		0AAC86222F5C6215008A3AFC /* HistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AAC86212F5C6215008A3AFC /* HistoryView.swift */; };
 		0AAC86242F5C6215008A3AFC /* LoRAView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AAC86232F5C6215008A3AFC /* LoRAView.swift */; };
@@ -51,6 +60,15 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		D959A236620855A5D88384BD /* TimelineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LTXDesktop/Editor/TimelineView.swift; sourceTree = "<group>"; };
+		1477A30EFBC343ECDAD02B7E /* EditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LTXDesktop/Editor/EditorView.swift; sourceTree = "<group>"; };
+		8A1D98CAC533341E264691C8 /* EditorViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LTXDesktop/Editor/EditorViewModel.swift; sourceTree = "<group>"; };
+		2D72034608EA67602A4D7E16 /* CompositionBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LTXDesktop/Editor/CompositionBuilder.swift; sourceTree = "<group>"; };
+		C7924D4C8416BC2FF54B90B0 /* FCPXMLWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LTXEditorCore/Sources/LTXEditorCore/FCPXMLWriter.swift; sourceTree = "<group>"; };
+		24DD1D9AE882B07A5BAB2433 /* ProjectStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LTXEditorCore/Sources/LTXEditorCore/ProjectStore.swift; sourceTree = "<group>"; };
+		2D1F29CC03C1BA75720B32B0 /* UndoStack.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LTXEditorCore/Sources/LTXEditorCore/UndoStack.swift; sourceTree = "<group>"; };
+		EAB1F9F662828D602939C5CF /* EditorOperations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LTXEditorCore/Sources/LTXEditorCore/EditorOperations.swift; sourceTree = "<group>"; };
+		F84CAA93C2474C3BC544DB38 /* EditorModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LTXEditorCore/Sources/LTXEditorCore/EditorModel.swift; sourceTree = "<group>"; };
 		0AAC86212F5C6215008A3AFC /* HistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryView.swift; sourceTree = "<group>"; };
 		0AAC86232F5C6215008A3AFC /* LoRAView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoRAView.swift; sourceTree = "<group>"; };
 		0AAC86252F5C6216008A3AFC /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
@@ -109,6 +127,15 @@
 		A400000001 = {
 			isa = PBXGroup;
 			children = (
+				D959A236620855A5D88384BD /* TimelineView.swift */,
+				1477A30EFBC343ECDAD02B7E /* EditorView.swift */,
+				8A1D98CAC533341E264691C8 /* EditorViewModel.swift */,
+				2D72034608EA67602A4D7E16 /* CompositionBuilder.swift */,
+				C7924D4C8416BC2FF54B90B0 /* FCPXMLWriter.swift */,
+				24DD1D9AE882B07A5BAB2433 /* ProjectStore.swift */,
+				2D1F29CC03C1BA75720B32B0 /* UndoStack.swift */,
+				EAB1F9F662828D602939C5CF /* EditorOperations.swift */,
+				F84CAA93C2474C3BC544DB38 /* EditorModel.swift */,
 				A400000002 /* LTXDesktop */,
 				A400000010 /* Products */,
 				3DAC688BC7819600CE3677B8 /* ControlVideoProcessor.swift */,
@@ -279,6 +306,15 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B727D078424AFC9C079F05A1 /* TimelineView.swift in Sources */,
+				7EF2E5D02ACC461B5EB9DE2E /* EditorView.swift in Sources */,
+				46AF54CC19257FEBDC8FEEFD /* EditorViewModel.swift in Sources */,
+				37853DEE424A72FE8BBDB6B6 /* CompositionBuilder.swift in Sources */,
+				71683D978ADBF4B0C0EDAA57 /* FCPXMLWriter.swift in Sources */,
+				C3C48C279B1981DCE83148EE /* ProjectStore.swift in Sources */,
+				6AB33EB0367EF3920579D980 /* UndoStack.swift in Sources */,
+				C6933DB817BCB0A43CBBEBB3 /* EditorOperations.swift in Sources */,
+				C03AC61A885F347E5DAE89A2 /* EditorModel.swift in Sources */,
 				A100000001 /* LTXDesktopApp.swift in Sources */,
 				A100000002 /* ContentView.swift in Sources */,
 				A100000003 /* ProcessManager.swift in Sources */,
