@@ -16,6 +16,7 @@ FAMILY_25 = "2.5"
 _CONFIG_FILES = ("embedded_config.json", "config.json")
 
 # Feature availability per family (ltx-2-mlx 0.15.9):
+# - TeaCache coefficients are calibrated for 2.3 only (the lib raises on 2.5).
 # - 2.5 has no IC-LoRAs yet and the trainer is 2.3-only, so every LoRA the app
 #   can import or train targets 2.3 (different latent space — never apply to 2.5).
 # - auto-duration (DurationHead), generated keyframe slots and the diffusion
@@ -27,6 +28,7 @@ _CAPABILITIES: dict[str, dict[str, bool]] = {
         "loras": True,
         "ic_lora": True,
         "training": True,
+        "teacache": True,
         "auto_duration": False,
         "generated_keyframes": False,
         "diffusion_decoder": False,
@@ -36,6 +38,7 @@ _CAPABILITIES: dict[str, dict[str, bool]] = {
         "loras": False,
         "ic_lora": False,
         "training": False,
+        "teacache": False,
         "auto_duration": True,
         "generated_keyframes": True,
         "diffusion_decoder": True,

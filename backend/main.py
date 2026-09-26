@@ -121,6 +121,10 @@ class T2VRequest(BaseModel):
     auto_duration: bool = Field(default=False, description="2.5 DurationHead picks the length")
     generated_keyframes: int = Field(default=0, ge=0, le=4, description="Keyframe slots")
     video_decoder: str = Field(default="conv", pattern="^(conv|diffusion)$")
+    # Prompt Relay: local prompts gated to even slices of the timeline (global prompt still applies)
+    segments: list[str] = Field(default=[], max_length=8)
+    generate_audio: bool = Field(default=True, description="False = video only (skip audio decode)")
+    enable_teacache: bool = Field(default=False, description="~1.5x stage 1 on two-stage pipelines")
 
 
 class I2VRequest(BaseModel):
@@ -142,6 +146,10 @@ class I2VRequest(BaseModel):
     auto_duration: bool = Field(default=False, description="2.5 DurationHead picks the length")
     generated_keyframes: int = Field(default=0, ge=0, le=4, description="Keyframe slots")
     video_decoder: str = Field(default="conv", pattern="^(conv|diffusion)$")
+    # Prompt Relay: local prompts gated to even slices of the timeline (global prompt still applies)
+    segments: list[str] = Field(default=[], max_length=8)
+    generate_audio: bool = Field(default=True, description="False = video only (skip audio decode)")
+    enable_teacache: bool = Field(default=False, description="~1.5x stage 1 on two-stage pipelines")
 
 
 class A2VRequest(BaseModel):
@@ -873,6 +881,13 @@ def _apply_family_rules(req: T2VRequest | I2VRequest) -> None:
         raise HTTPException(status_code=400, detail="Auto duration requires an LTX-2.5 model")
     if req.generated_keyframes and not caps["generated_keyframes"]:
         raise HTTPException(status_code=400, detail="Keyframe slots require an LTX-2.5 model")
+    if any(not s.strip() for s in req.segments):
+        raise HTTPException(status_code=400, detail="Prompt Relay segments must not be empty")
+    if req.enable_teacache:
+        if req.pipeline_type not in ("two-stage", "two-stage-hq"):
+            raise HTTPException(status_code=400, detail="TeaCache needs a two-stage pipeline")
+        if not caps["teacache"]:
+            raise HTTPException(status_code=400, detail=f"TeaCache is not available for LTX-{family}")
     if req.video_decoder != "conv" and not caps["diffusion_decoder"]:
         raise HTTPException(status_code=400, detail="Diffusion decoder requires an LTX-2.5 model")
     if family == FAMILY_25 and not req.low_ram and _system_ram_gb() < _LTX25_FULL_RAM_GB:
@@ -981,6 +996,9 @@ async def _run_t2v(job_id: str, req: T2VRequest) -> None:
             auto_duration=req.auto_duration,
             generated_keyframes=req.generated_keyframes,
             video_decoder=req.video_decoder,
+            segments=req.segments,
+            generate_audio=req.generate_audio,
+            enable_teacache=req.enable_teacache,
             progress_callback=progress_cb,
         )
         jobs[job_id]["status"] = "completed"
@@ -1048,6 +1066,9 @@ async def _run_i2v(job_id: str, req: I2VRequest) -> None:
             auto_duration=req.auto_duration,
             generated_keyframes=req.generated_keyframes,
             video_decoder=req.video_decoder,
+            segments=req.segments,
+            generate_audio=req.generate_audio,
+            enable_teacache=req.enable_teacache,
             progress_callback=progress_cb,
         )
         jobs[job_id]["status"] = "completed"

@@ -81,6 +81,28 @@ def test_25_options_refused_on_23(tmp_path: Path, field: dict) -> None:
     assert r.status_code == 400
 
 
+@pytest.mark.parametrize(
+    ("family", "body", "ok"),
+    [
+        ("2.3", {"enable_teacache": True, "pipeline_type": "two-stage"}, True),
+        ("2.3", {"enable_teacache": True, "pipeline_type": "distilled"}, False),
+        ("2.5", {"enable_teacache": True, "pipeline_type": "two-stage-hq"}, False),
+        ("2.3", {"segments": ["a", " "]}, False),
+        ("2.5", {"segments": ["shot one", "shot two"], "generate_audio": False}, True),
+    ],
+)
+def test_relay_audio_teacache_validation(tmp_path: Path, monkeypatch, family, body, ok) -> None:
+    _register_and_select(tmp_path, family)
+    monkeypatch.setattr(main, "_system_ram_gb", lambda: 128.0)
+    req = main.T2VRequest(prompt="x", **body)
+    if ok:
+        main._apply_family_rules(req)
+    else:
+        with pytest.raises(main.HTTPException) as exc:
+            main._apply_family_rules(req)
+        assert exc.value.status_code == 400
+
+
 def test_loras_refused_on_25(tmp_path: Path) -> None:
     _register_and_select(tmp_path, "2.5")
     r = client.post("/api/v1/generate/text-to-video", json={"prompt": "x", "lora_ids": ["mine"]})

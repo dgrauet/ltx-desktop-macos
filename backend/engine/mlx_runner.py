@@ -245,6 +245,9 @@ async def run_mlx_generation(
     auto_duration: bool = False,
     generated_keyframes: int = 0,
     video_decoder: str = "conv",
+    segments: list[str] | None = None,
+    generate_audio: bool = True,
+    enable_teacache: bool = False,
     progress_callback: Callable[..., Awaitable[None]] | None = None,
     venv_python: str | None = None,
     model_repo_id: str | None = None,
@@ -286,6 +289,14 @@ async def run_mlx_generation(
         cmd.extend(["--generated-keyframes", str(generated_keyframes)])
     if video_decoder != "conv":
         cmd.extend(["--video-decoder", video_decoder])
+
+    # Prompt Relay segments, audio, TeaCache
+    for segment in segments or []:
+        cmd.extend(["--segment", segment])
+    if not generate_audio:
+        cmd.append("--no-audio")
+    if enable_teacache:
+        cmd.append("--enable-teacache")
 
     # I2V args
     if image:

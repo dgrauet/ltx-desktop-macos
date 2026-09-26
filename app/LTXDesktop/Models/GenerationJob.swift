@@ -16,6 +16,10 @@ struct T2VRequest: Codable {
     var autoDuration: Bool = false
     var generatedKeyframes: Int = 0
     var videoDecoder: String = "conv"
+    // Prompt Relay local prompts, audio on/off, TeaCache
+    var segments: [String] = []
+    var generateAudio: Bool = true
+    var enableTeacache: Bool = false
 
     enum CodingKeys: String, CodingKey {
         case prompt, width, height, steps, seed, fps
@@ -27,6 +31,9 @@ struct T2VRequest: Codable {
         case autoDuration = "auto_duration"
         case generatedKeyframes = "generated_keyframes"
         case videoDecoder = "video_decoder"
+        case segments
+        case generateAudio = "generate_audio"
+        case enableTeacache = "enable_teacache"
     }
 }
 
@@ -49,6 +56,10 @@ struct I2VRequest: Codable {
     var autoDuration: Bool = false
     var generatedKeyframes: Int = 0
     var videoDecoder: String = "conv"
+    // Prompt Relay local prompts, audio on/off, TeaCache
+    var segments: [String] = []
+    var generateAudio: Bool = true
+    var enableTeacache: Bool = false
 
     enum CodingKeys: String, CodingKey {
         case prompt, width, height, steps, seed, fps
@@ -62,6 +73,9 @@ struct I2VRequest: Codable {
         case autoDuration = "auto_duration"
         case generatedKeyframes = "generated_keyframes"
         case videoDecoder = "video_decoder"
+        case segments
+        case generateAudio = "generate_audio"
+        case enableTeacache = "enable_teacache"
     }
 }
 
