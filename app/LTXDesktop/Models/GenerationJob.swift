@@ -12,6 +12,10 @@ struct T2VRequest: Codable {
     var pipelineType: String = "distilled"
     var lowRam: Bool = false
     var loraIds: [String] = []
+    // LTX-2.5 only
+    var autoDuration: Bool = false
+    var generatedKeyframes: Int = 0
+    var videoDecoder: String = "conv"
 
     enum CodingKeys: String, CodingKey {
         case prompt, width, height, steps, seed, fps
@@ -20,6 +24,9 @@ struct T2VRequest: Codable {
         case pipelineType = "pipeline_type"
         case lowRam = "low_ram"
         case loraIds = "lora_ids"
+        case autoDuration = "auto_duration"
+        case generatedKeyframes = "generated_keyframes"
+        case videoDecoder = "video_decoder"
     }
 }
 
@@ -38,6 +45,10 @@ struct I2VRequest: Codable {
     var lowRam: Bool = false
     var imageStrength: Double = 1.0
     var loraIds: [String] = []
+    // LTX-2.5 only
+    var autoDuration: Bool = false
+    var generatedKeyframes: Int = 0
+    var videoDecoder: String = "conv"
 
     enum CodingKeys: String, CodingKey {
         case prompt, width, height, steps, seed, fps
@@ -48,6 +59,9 @@ struct I2VRequest: Codable {
         case lowRam = "low_ram"
         case imageStrength = "image_strength"
         case loraIds = "lora_ids"
+        case autoDuration = "auto_duration"
+        case generatedKeyframes = "generated_keyframes"
+        case videoDecoder = "video_decoder"
     }
 }
 

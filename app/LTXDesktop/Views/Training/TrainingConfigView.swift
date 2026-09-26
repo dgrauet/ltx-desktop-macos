@@ -15,6 +15,9 @@ struct TrainingConfigView: View {
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
+                    if !vm.trainingSupported {
+                        unsupportedModelBanner
+                    }
                     modeSection
                     parametersSection
                     preflightSection
@@ -24,6 +27,19 @@ struct TrainingConfigView: View {
                 .padding(16)
             }
         }
+        .task { await vm.loadModelSupport(using: backendService) }
+    }
+
+    private var unsupportedModelBanner: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "info.circle.fill")
+                .foregroundStyle(.orange)
+            Text("LoRA training needs an LTX-2.3 model. The selected model is LTX-2.5 — pick an LTX-2.3 model in Settings › Models to train.")
+                .font(.callout)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(10)
+        .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
     }
 
     // MARK: - Header
@@ -119,7 +135,7 @@ struct TrainingConfigView: View {
                 }
             }
             .buttonStyle(.bordered)
-            .disabled(vm.selectedDatasetId == nil || isRunningPreflight || vm.isTraining)
+            .disabled(vm.selectedDatasetId == nil || isRunningPreflight || vm.isTraining || !vm.trainingSupported)
 
             if let result = vm.preflight {
                 preflightBanner(result)
@@ -211,7 +227,7 @@ struct TrainingConfigView: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(vm.selectedDatasetId == nil || vm.isTraining || isStartingTraining)
+                .disabled(vm.selectedDatasetId == nil || vm.isTraining || isStartingTraining || !vm.trainingSupported)
 
                 if vm.isTraining {
                     Button {

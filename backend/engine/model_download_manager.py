@@ -13,6 +13,9 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from engine import local_models
+from engine.model_family import FAMILY_23, FAMILY_25, capabilities, detect_family
+
 log = logging.getLogger(__name__)
 
 # HuggingFace cache root
@@ -29,6 +32,7 @@ _KNOWN_MODELS: list[dict[str, Any]] = [
         "hf_repo": "dgrauet/ltx-2.3-mlx-q8",
         "check_path": _HF_CACHE / "models--dgrauet--ltx-2.3-mlx-q8",
         "check_file": "transformer-distilled.safetensors",
+       "family": FAMILY_23,
     },
     {
         "id": "ltx-2.3-mlx-q4",
@@ -39,6 +43,7 @@ _KNOWN_MODELS: list[dict[str, Any]] = [
         "hf_repo": "dgrauet/ltx-2.3-mlx-q4",
         "check_path": _HF_CACHE / "models--dgrauet--ltx-2.3-mlx-q4",
         "check_file": "transformer-distilled.safetensors",
+       "family": FAMILY_23,
     },
     {
         "id": "ltx-2.3-mlx",
@@ -49,11 +54,42 @@ _KNOWN_MODELS: list[dict[str, Any]] = [
         "hf_repo": "dgrauet/ltx-2.3-mlx",
         "check_path": _HF_CACHE / "models--dgrauet--ltx-2.3-mlx",
         "check_file": "transformer-distilled.safetensors",
+       "family": FAMILY_23,
+    },
+    {
+        "id": "ltx-2.5-mlx-q8",
+        "name": "LTX-2.5 (int8)",
+        "description": (
+            "LTX-2.5: multishot, auto duration, keyframe slots. Gemma 4 text encoder built in. "
+            "Low-RAM streaming is forced on 32 GB Macs. Gated: needs an HF token and licence."
+        ),
+        "size_gb": 75.0,
+        "model_type": "video_generator",
+        "hf_repo": "dgrauet/ltx-2.5-mlx-q8",
+        "check_file": "transformer-distilled.safetensors",
+        "family": FAMILY_25,
+        "gated": True,
+    },
+    {
+        "id": "ltx-2.5-mlx-q4",
+        "name": "LTX-2.5 (int4)",
+        "description": (
+            "LTX-2.5, int4 quantized: smaller, some quality loss. Gemma 4 text encoder built in. "
+            "Gated: needs an HF token and licence."
+        ),
+        "size_gb": 47.0,
+        "model_type": "video_generator",
+        "hf_repo": "dgrauet/ltx-2.5-mlx-q4",
+        "check_file": "transformer-distilled.safetensors",
+        "family": FAMILY_25,
+        "gated": True,
     },
     {
         "id": "gemma-3-12b-it-4bit",
         "name": "Gemma 3 12B IT (4-bit)",
-        "description": "Text encoder for video generation. Converts prompts to embeddings understood by LTX-2.3.",
+        "description": (
+            "Text encoder for LTX-2.3 video generation, and the prompt enhancer for every model."
+        ),
         "size_gb": 6.0,
         "model_type": "text_encoder",
         "hf_repo": "mlx-community/gemma-3-12b-it-4bit",
@@ -222,6 +258,50 @@ def resolve_ic_lora_path(model_id: str | None = None) -> str | None:
     return cached if isinstance(cached, str) else None
 
 
+def _public_entry(m: dict[str, Any], *, downloaded: bool, size_gb: float) -> dict[str, Any]:
+    """API-facing view of a catalog or local entry."""
+    entry = {
+        "id": m["id"],
+        "name": m["name"],
+        "description": m["description"],
+        "size_gb": size_gb,
+        "model_type": m["model_type"],
+        "downloaded": downloaded,
+        "hf_repo": m["hf_repo"],
+        "source": m.get("source", "hf"),
+        "gated": m.get("gated", False),
+        "family": m.get("family"),
+        "capabilities": capabilities(m["family"]) if m.get("family") else None,
+    }
+    return entry
+
+
+def _local_entries() -> list[dict[str, Any]]:
+    """Registered local packs, shaped like catalog entries."""
+    entries = []
+    for reg in local_models.list_local():
+        path = Path(reg["path"])
+        entries.append({
+            "id": reg["id"],
+            "name": f"{reg['name']} (local)",
+            "description": f"Local model pack: {path}",
+            "size_gb": 0.0,
+            "model_type": "video_generator",
+            "hf_repo": str(path),
+            "family": detect_family(path),
+            "source": "local",
+            "_present": path.is_dir(),
+        })
+    return entries
+
+
+def _find(model_id: str) -> dict[str, Any] | None:
+    for m in [*_KNOWN_MODELS, *_local_entries()]:
+        if m["id"] == model_id:
+            return m
+    return None
+
+
 class ModelDownloadManager:
     """Manages model listing, downloading, and deletion."""
 
@@ -245,17 +325,10 @@ class ModelDownloadManager:
                 disk_size = _dir_size_gb(cache_dir)
                 if disk_size > 0.1:
                     actual_size = round(disk_size, 2)
-            result.append(
-                {
-                    "id": m["id"],
-                    "name": m["name"],
-                    "description": m["description"],
-                    "size_gb": actual_size,
-                    "model_type": m["model_type"],
-                    "downloaded": downloaded,
-                    "hf_repo": m["hf_repo"],
-                }
-            )
+            result.append(_public_entry(m, downloaded=downloaded, size_gb=actual_size))
+        for m in _local_entries():
+            size = round(_dir_size_gb(Path(m["hf_repo"])), 2) if m["_present"] else 0.0
+            result.append(_public_entry(m, downloaded=m["_present"], size_gb=size))
         return result
 
     def get_model(self, model_id: str) -> dict[str, Any] | None:
@@ -267,18 +340,13 @@ class ModelDownloadManager:
         Returns:
             Model info dict or None.
         """
-        for m in _KNOWN_MODELS:
-            if m["id"] == model_id:
-                return {
-                    "id": m["id"],
-                    "name": m["name"],
-                    "description": m["description"],
-                    "size_gb": m["size_gb"],
-                    "model_type": m["model_type"],
-                    "downloaded": _is_downloaded(m),
-                    "hf_repo": m["hf_repo"],
-                }
-        return None
+        m = _find(model_id)
+        if m is None:
+            return None
+        if m.get("source") == "local":
+            size = round(_dir_size_gb(Path(m["hf_repo"])), 2) if m["_present"] else 0.0
+            return _public_entry(m, downloaded=m["_present"], size_gb=size)
+        return _public_entry(m, downloaded=_is_downloaded(m), size_gb=m["size_gb"])
 
     def start_download(self, download_id: str, model_id: str) -> None:
         """Initialize download tracking entry.
@@ -340,7 +408,9 @@ class ModelDownloadManager:
 
             # Verify the download is complete (safetensors files exist in snapshot)
             from huggingface_hub import try_to_load_from_cache
-            verify_file = allow_patterns[0] if allow_patterns else "config.json"
+            verify_file = (
+                allow_patterns[0] if allow_patterns else model_def.get("check_file", "config.json")
+            )
             cached = try_to_load_from_cache(hf_repo, verify_file)
             if not cached or not isinstance(cached, str):
                 raise RuntimeError(
@@ -403,6 +473,11 @@ class ModelDownloadManager:
                 model_def = m
                 break
         if model_def is None:
+            local = _find(model_id)
+            if local is not None and local.get("source") == "local":
+                raise ValueError(
+                    "Local model packs are never deleted from disk; unregister them instead"
+                )
             raise ValueError(f"Unknown model: {model_id}")
 
         hf_repo = model_def["hf_repo"]

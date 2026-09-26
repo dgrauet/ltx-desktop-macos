@@ -48,6 +48,8 @@ final class TrainingViewModel: ObservableObject {
     // MARK: - Error
 
     @Published var errorMessage: String?
+    /// False when the selected video model cannot be trained (LTX-2.5: trainer is 2.3-only).
+    @Published var trainingSupported: Bool = true
 
     // MARK: - Private
 
@@ -56,6 +58,15 @@ final class TrainingViewModel: ObservableObject {
     private var activeJobId: String?
 
     // MARK: - Datasets
+
+    /// Refresh whether the selected video model supports LoRA training.
+    func loadModelSupport(using service: BackendService) async {
+        guard let response = try? await service.listModels() else { return }
+        let selected = response.models.first {
+            $0.modelType == "video_generator" && $0.hfRepo == response.selectedVideoModel
+        }
+        trainingSupported = selected?.capabilities?.training ?? true
+    }
 
     func loadDatasets(using service: BackendService) async {
         do {

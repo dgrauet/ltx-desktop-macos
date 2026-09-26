@@ -185,6 +185,24 @@ class BackendService: ObservableObject {
         return try await get("/api/v1/models/download/\(downloadId)/status")
     }
 
+    /// Register a local model pack directory (e.g. a pre-converted LTX-2.5 pack).
+    func registerLocalModel(path: String) async throws -> ModelInfo {
+        return try await post("/api/v1/models/local", body: LocalModelRequest(path: path))
+    }
+
+    /// Unregister a local pack. The backend never deletes its files.
+    func unregisterLocalModel(modelId: String) async throws {
+        let url = URL(string: "\(baseURL)/api/v1/models/local/\(modelId)")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let body = String(data: data, encoding: .utf8) ?? "(no body)"
+            throw BackendError.requestFailed(code, body)
+        }
+    }
+
     func deleteModel(modelId: String) async throws -> ModelDeleteResponse {
         let url = URL(string: "\(baseURL)/api/v1/models/\(modelId)")!
         var request = URLRequest(url: url)

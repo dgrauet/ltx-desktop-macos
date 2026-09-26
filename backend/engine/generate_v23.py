@@ -20,33 +20,36 @@ from engine.memory_manager import aggressive_cleanup, get_memory_stats
 # ---------------------------------------------------------------------------
 
 _current_stage = 1
+# True once the first denoise loop has opened. Stages advance when the *next*
+# loop opens: samplers may ``break`` out of their last step (the 2.5 ancestral
+# sampler does), so code after the generator's ``for`` is not guaranteed to run.
+_denoise_loop_started = False
 
 
 class _ProgressTqdm:
     """Drop-in tqdm replacement that emits STAGE:STEP lines on stderr."""
 
     def __init__(self, iterable=None, *, desc="", total=None, disable=False, **kwargs):
-        global _current_stage
+        global _current_stage, _denoise_loop_started
         self._iterable = iterable
         self._items = list(iterable) if iterable is not None else []
         self._total = total or len(self._items)
         self._desc = desc or ""
         self._disable = disable
         self._step = 0
-        # Emit a STATUS for each new denoising loop
+        # Each new denoising loop opens the next stage and emits a STATUS
         if not disable and "denois" in self._desc.lower():
+            if _denoise_loop_started:
+                _current_stage += 1
+            _denoise_loop_started = True
             _progress(f"STATUS:Denoising stage {_current_stage} ({self._total} steps)")
 
     def __iter__(self):
-        global _current_stage
         for item in self._items:
             self._step += 1
             if not self._disable:
                 _progress(f"STAGE:{_current_stage}:STEP:{self._step}:{self._total}")
             yield item
-        # After completing a denoising loop, advance stage for next loop
-        if not self._disable and "denois" in self._desc.lower():
-            _current_stage += 1
 
     def __enter__(self):
         return self
@@ -176,17 +179,33 @@ def _run_t2v(pipeline, args: argparse.Namespace) -> None:
     _current_stage = 1
     _progress("STATUS:Generating video")
 
+    pipeline.generate_and_save(**build_t2v_gen_kwargs(args))
+
+    _report_memory("after_generation")
+    _progress("STATUS:Done")
+
+
+def build_t2v_gen_kwargs(args: argparse.Namespace) -> dict:
+    """``generate_and_save`` kwargs for T2V / I2V on the selected pipeline type."""
     pipeline_type = getattr(args, "pipeline_type", "distilled")
+
+    num_frames = args.num_frames
+    if getattr(args, "auto_duration", False):
+        # LTX-2.5 DurationHead predicts the length from the prompt (1–20 s clamp)
+        from ltx_pipelines_mlx.utils.types import DEFAULT_AUTO_DURATION
+        num_frames = DEFAULT_AUTO_DURATION
 
     gen_kwargs: dict = {
         "prompt": args.prompt,
         "output_path": args.output_path,
         "height": args.height,
         "width": args.width,
-        "num_frames": args.num_frames,
+        "num_frames": num_frames,
         "frame_rate": float(args.fps),
         "seed": args.seed,
     }
+    if getattr(args, "generated_keyframes", 0):
+        gen_kwargs["generated_keyframes"] = args.generated_keyframes
 
     if pipeline_type == "one-stage":
         gen_kwargs["num_steps"] = args.num_steps
@@ -211,11 +230,7 @@ def _run_t2v(pipeline, args: argparse.Namespace) -> None:
                 path=args.image, frame_idx=0, strength=args.image_strength,
             )
         ]
-
-    pipeline.generate_and_save(**gen_kwargs)
-
-    _report_memory("after_generation")
-    _progress("STATUS:Done")
+    return gen_kwargs
 
 
 def _run_a2v(pipeline, args: argparse.Namespace) -> None:
@@ -503,6 +518,14 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lora", action="append", default=None,
                         help="LoRA path:strength (can repeat)")
 
+    # LTX-2.5 only (refused by the lib on 2.3 packs)
+    parser.add_argument("--auto-duration", action="store_true",
+                        help="Let the 2.5 DurationHead pick the clip length (ignores --num-frames)")
+    parser.add_argument("--generated-keyframes", type=int, default=0,
+                        help="Generated keyframe slots for fast motion (2.5 packs)")
+    parser.add_argument("--video-decoder", choices=["conv", "diffusion"], default="conv",
+                        help="Video VAE decoder; 'diffusion' is sharper/slower (2.5, experimental)")
+
     # Progressive preview
     parser.add_argument("--preview-dir", default=None,
                         help="Write stepwise previews here and announce them as PREVIEW:<path>")
@@ -524,6 +547,8 @@ def main() -> None:
 
     _install_tqdm_hook()
     pipeline = _create_pipeline(args)
+    if args.video_decoder != "conv":
+        pipeline.video_decoder = args.video_decoder
     if args.preview_dir:
         from engine.preview import make_preview
         pipeline.stepwise = make_preview(

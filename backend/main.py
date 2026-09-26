@@ -29,7 +29,9 @@ import training_store
 from engine.lora_manager import LoRAManager
 from engine.memory_manager import aggressive_cleanup, get_memory_stats, memory_pressure_monitor
 from engine.mlx_runner import get_model_repo, get_python_binary, run_prompt_enhance
+from engine import local_models
 from engine.model_download_manager import ModelDownloadManager, resolve_ic_lora_path
+from engine.model_family import FAMILY_25, capabilities, detect_family, family_from_repo_name
 from engine.model_manager import ModelManager
 from engine.pipelines.audio_to_video import AudioToVideoPipeline
 from engine.pipelines.extend import ExtendPipeline
@@ -115,7 +117,10 @@ class T2VRequest(BaseModel):
     pipeline_type: str = Field(default="distilled", pattern="^(distilled|one-stage|two-stage|two-stage-hq)$")
     low_ram: bool = Field(default=False, description="Stream DiT blocks from disk (less RAM)")
     lora_ids: list[str] = Field(default=[], description="LoRA IDs to apply (empty = use active LoRAs)")
-
+    # LTX-2.5 only (400 on 2.3 models)
+    auto_duration: bool = Field(default=False, description="2.5 DurationHead picks the length")
+    generated_keyframes: int = Field(default=0, ge=0, le=4, description="Keyframe slots")
+    video_decoder: str = Field(default="conv", pattern="^(conv|diffusion)$")
 
 
 class I2VRequest(BaseModel):
@@ -133,6 +138,10 @@ class I2VRequest(BaseModel):
     low_ram: bool = Field(default=False, description="Stream DiT blocks from disk (less RAM)")
     image_strength: float = Field(default=1.0, ge=0.0, le=1.0)
     lora_ids: list[str] = Field(default=[], description="LoRA IDs to apply (empty = use active LoRAs)")
+    # LTX-2.5 only (400 on 2.3 models)
+    auto_duration: bool = Field(default=False, description="2.5 DurationHead picks the length")
+    generated_keyframes: int = Field(default=0, ge=0, le=4, description="Keyframe slots")
+    video_decoder: str = Field(default="conv", pattern="^(conv|diffusion)$")
 
 
 class A2VRequest(BaseModel):
@@ -601,6 +610,10 @@ class ModelInfoResponse(BaseModel):
     model_type: str
     downloaded: bool
     hf_repo: str
+    source: str = "hf"  # "hf" (catalog, HF cache) or "local" (registered pack directory)
+    gated: bool = False
+    family: str | None = None  # "2.3" / "2.5" for video generators
+    capabilities: dict[str, bool] | None = None
 
 
 class ModelListResponse(BaseModel):
@@ -683,6 +696,36 @@ async def select_model(req: ModelSelectRequest):
     return {"success": True, "model_id": req.model_id, "hf_repo": selected_video_model}
 
 
+class LocalModelRequest(BaseModel):
+    """Register a local model pack directory."""
+    path: str = Field(..., min_length=1)
+    name: str | None = Field(default=None, max_length=100)
+
+
+@app.post("/api/v1/models/local", response_model=ModelInfoResponse)
+async def register_local_model(req: LocalModelRequest):
+    """Register a local LTX pack directory (e.g. a converted or pre-downloaded 2.5 pack)."""
+    try:
+        entry = local_models.register(req.path, req.name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    model = model_download_manager.get_model(entry["id"])
+    return ModelInfoResponse(**model)
+
+
+@app.delete("/api/v1/models/local/{model_id}")
+async def unregister_local_model(model_id: str):
+    """Unregister a local pack. Its files are left untouched."""
+    global selected_video_model
+    entry = next((e for e in local_models.list_local() if e["id"] == model_id), None)
+    if entry is None:
+        raise HTTPException(status_code=404, detail=f"Unknown local model: {model_id}")
+    local_models.unregister(model_id)
+    if selected_video_model == entry["path"]:
+        selected_video_model = None
+    return {"success": True, "model_id": model_id}
+
+
 @app.post("/api/v1/models/download", response_model=ModelDownloadResponse)
 async def download_model(req: ModelDownloadRequest):
     """Start downloading a model asynchronously."""
@@ -733,6 +776,11 @@ async def delete_model(model_id: str):
     model = model_download_manager.get_model(model_id)
     if model is None:
         raise HTTPException(status_code=404, detail=f"Unknown model: {model_id}")
+    if model["source"] == "local":
+        raise HTTPException(
+            status_code=400,
+            detail="Local packs are never deleted from disk; unregister them instead",
+        )
     if not model["downloaded"]:
         raise HTTPException(
             status_code=400, detail=f"Model not downloaded: {model_id}"
@@ -781,6 +829,57 @@ def _check_training_lock() -> None:
         raise HTTPException(status_code=409, detail="Training in progress")
 
 
+# LTX-2.5 transformers are ~19 GB at q8: below this much RAM, force block streaming
+_LTX25_FULL_RAM_GB = 64
+
+
+def _system_ram_gb() -> float:
+    try:
+        return int(subprocess.run(
+            ["sysctl", "-n", "hw.memsize"], capture_output=True, text=True, check=True,
+        ).stdout.strip()) / (1024**3)
+    except Exception:
+        return 0.0
+
+
+def _selected_family() -> str:
+    """Model family ("2.3"/"2.5") of the currently selected video model."""
+    path, _ = get_model_repo(selected_video_model)
+    if Path(path).is_dir():
+        return detect_family(path)
+    return family_from_repo_name(path)
+
+
+def _require_capability(feature: str, label: str) -> None:
+    """400 if the selected model's family lacks ``feature``."""
+    family = _selected_family()
+    if not capabilities(family)[feature]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{label} is not available for LTX-{family} models. Select an LTX-2.3 model.",
+        )
+
+
+def _apply_family_rules(req: T2VRequest | I2VRequest) -> None:
+    """Validate 2.5-only options against the selected model; force low-RAM for 2.5 on small Macs."""
+    family = _selected_family()
+    caps = capabilities(family)
+    if req.lora_ids and not caps["loras"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"LoRAs in the library target LTX-2.3 and cannot be applied to LTX-{family}",
+        )
+    if req.auto_duration and not caps["auto_duration"]:
+        raise HTTPException(status_code=400, detail="Auto duration requires an LTX-2.5 model")
+    if req.generated_keyframes and not caps["generated_keyframes"]:
+        raise HTTPException(status_code=400, detail="Keyframe slots require an LTX-2.5 model")
+    if req.video_decoder != "conv" and not caps["diffusion_decoder"]:
+        raise HTTPException(status_code=400, detail="Diffusion decoder requires an LTX-2.5 model")
+    if family == FAMILY_25 and not req.low_ram and _system_ram_gb() < _LTX25_FULL_RAM_GB:
+        log.info("LTX-2.5 on < %d GB RAM: forcing low-RAM block streaming", _LTX25_FULL_RAM_GB)
+        req.low_ram = True
+
+
 @app.post("/api/v1/generate/text-to-video", response_model=QueueSubmitResponse)
 async def generate_t2v(req: T2VRequest, priority: str = "normal"):
     """Submit a text-to-video generation job to the queue.
@@ -791,6 +890,7 @@ async def generate_t2v(req: T2VRequest, priority: str = "normal"):
     """
     _check_queue_paused()
     _check_training_lock()
+    _apply_family_rules(req)
     job_id = str(uuid.uuid4())[:8]
     pri = _PRIORITY_MAP.get(priority, Priority.NORMAL)
     jobs[job_id] = {
@@ -822,6 +922,7 @@ async def generate_i2v(req: I2VRequest, priority: str = "normal"):
     """
     _check_queue_paused()
     _check_training_lock()
+    _apply_family_rules(req)
     job_id = str(uuid.uuid4())[:8]
     pri = _PRIORITY_MAP.get(priority, Priority.NORMAL)
     jobs[job_id] = {
@@ -840,6 +941,18 @@ async def generate_i2v(req: I2VRequest, priority: str = "normal"):
     return QueueSubmitResponse(
         job_id=job_id, position=position, queue_length=job_queue.get_queue_length(),
     )
+
+
+def _history_frames(output_path: str, req: T2VRequest | I2VRequest) -> int:
+    """Frame count for history; auto-duration clips are probed since the model picked the length."""
+    if not req.auto_duration:
+        return req.num_frames
+    try:
+        from engine.ffmpeg_utils import probe_video_info
+        _, _, duration = probe_video_info(output_path)
+        return round(duration * req.fps)
+    except Exception:
+        return req.num_frames
 
 
 async def _run_t2v(job_id: str, req: T2VRequest) -> None:
@@ -865,6 +978,9 @@ async def _run_t2v(job_id: str, req: T2VRequest) -> None:
             low_ram=req.low_ram,
             lora_args=_resolve_lora_args(req.lora_ids),
             model_repo_id=selected_video_model,
+            auto_duration=req.auto_duration,
+            generated_keyframes=req.generated_keyframes,
+            video_decoder=req.video_decoder,
             progress_callback=progress_cb,
         )
         jobs[job_id]["status"] = "completed"
@@ -886,7 +1002,7 @@ async def _run_t2v(job_id: str, req: T2VRequest) -> None:
             duration_seconds=result.duration_seconds,
             width=req.width,
             height=req.height,
-            num_frames=req.num_frames,
+            num_frames=_history_frames(result.output_path, req),
             fps=req.fps,
             seed=resolved_seed,
             generation_type="t2v",
@@ -929,6 +1045,9 @@ async def _run_i2v(job_id: str, req: I2VRequest) -> None:
             image_strength=req.image_strength,
             lora_args=_resolve_lora_args(req.lora_ids),
             model_repo_id=selected_video_model,
+            auto_duration=req.auto_duration,
+            generated_keyframes=req.generated_keyframes,
+            video_decoder=req.video_decoder,
             progress_callback=progress_cb,
         )
         jobs[job_id]["status"] = "completed"
@@ -950,7 +1069,7 @@ async def _run_i2v(job_id: str, req: I2VRequest) -> None:
             duration_seconds=result.duration_seconds,
             width=req.width,
             height=req.height,
-            num_frames=req.num_frames,
+            num_frames=_history_frames(result.output_path, req),
             fps=req.fps,
             seed=resolved_seed,
             generation_type="i2v",
@@ -1060,6 +1179,7 @@ async def generate_ic_lora(req: ICLoraRequest, priority: str = "normal"):
     """Submit an IC-LoRA controlled generation job to the queue."""
     _check_queue_paused()
     _check_training_lock()
+    _require_capability("ic_lora", "IC-LoRA control")
     job_id = str(uuid.uuid4())[:8]
     pri = _PRIORITY_MAP.get(priority, Priority.NORMAL)
     jobs[job_id] = {
@@ -2056,6 +2176,7 @@ async def training_preflight(req: TrainingPreflightRequest):
     from training_lock import training_lock as _tl
     from engine.training import protocol as _proto
 
+    _require_capability("training", "LoRA training")
     dataset_id = _safe_dataset_id(req.dataset_id)
 
     if not _tl.try_acquire("training"):
@@ -2155,6 +2276,7 @@ async def create_training_run(req: TrainingRunRequest):
     """
     import datetime
 
+    _require_capability("training", "LoRA training")
     dataset_id = _safe_dataset_id(req.dataset_id)
     run_id = str(uuid.uuid4())
     job_id = str(uuid.uuid4())[:8]

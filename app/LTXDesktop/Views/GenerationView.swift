@@ -62,7 +62,7 @@ struct GenerationView: View {
             await vm.fetchHardwareLimits(service: backendService)
             await vm.loadPresets(service: backendService)
             await vm.fetchLoRAs(service: backendService)
-            await vm.loadICLoras(service: backendService)
+            await vm.loadModelContext(service: backendService)
         }
         .alert("Save Preset", isPresented: $showSavePresetAlert) {
             TextField("Preset name", text: $newPresetName)
@@ -99,8 +99,10 @@ struct GenerationView: View {
                     audioDropZone
                 }
 
-                // Control-video drop zone for IC-LoRA
-                controlVideoDropZone
+                // Control-video drop zone for IC-LoRA (no IC-LoRAs exist for LTX-2.5)
+                if !vm.isLTX25 {
+                    controlVideoDropZone
+                }
 
                 // Prompt
                 Text("Prompt")
@@ -185,6 +187,7 @@ struct GenerationView: View {
                         }
                     }
                     .frame(width: 130)
+                    .disabled(autoDurationActive)
 
                     Spacer()
 
@@ -236,12 +239,19 @@ struct GenerationView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
+                // LTX-2.5 options (auto duration, keyframe slots, decoder)
+                if vm.isLTX25 && vm.sourceAudioPath == nil {
+                    ltx25Section
+                }
+
                 // Low RAM mode (DiT block streaming)
                 VStack(alignment: .leading, spacing: 4) {
                     Toggle("Low RAM mode", isOn: $vm.lowRam)
                         .toggleStyle(.switch)
                         .controlSize(.small)
-                    Text("Streams model weights from disk (~75% less RAM). Slower, but enables larger models on 16–32 GB Macs.")
+                    Text(vm.isLTX25
+                         ? "LTX-2.5 always streams weights on Macs with less than 64 GB of RAM."
+                         : "Streams model weights from disk (~75% less RAM). Slower, but enables larger models on 16–32 GB Macs.")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -373,7 +383,9 @@ struct GenerationView: View {
                 }
 
                 // LoRA selection
-                loraSection
+                if !vm.isLTX25 {
+                    loraSection  // library LoRAs target LTX-2.3
+                }
 
                 Divider()
 
@@ -480,6 +492,60 @@ struct GenerationView: View {
     }
 
     // MARK: - Queue Status Bar
+
+    /// Auto duration only applies to text/image-to-video on LTX-2.5.
+    private var autoDurationActive: Bool {
+        vm.isLTX25 && vm.autoDuration && vm.sourceAudioPath == nil
+    }
+
+    // MARK: - LTX-2.5 Options
+
+    private var ltx25Section: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("LTX-2.5")
+                .font(.subheadline.weight(.semibold))
+
+            Toggle("Auto duration", isOn: $vm.autoDuration)
+                .toggleStyle(.switch)
+                .controlSize(.small)
+            Text("The model picks the clip length (1–20 s) from the prompt. Frames are ignored.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack {
+                Text("Keyframe slots")
+                    .font(.subheadline)
+                Spacer()
+                Stepper(value: $vm.generatedKeyframes, in: 0...4) {
+                    Text("\(vm.generatedKeyframes)")
+                        .monospacedDigit()
+                }
+            }
+            Text("Extra generated keyframes for fast motion. Each slot costs one latent frame of compute.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack {
+                Text("Decoder")
+                    .font(.subheadline)
+                Picker("", selection: $vm.videoDecoder) {
+                    Text("Conv (fast)").tag("conv")
+                    Text("Diffusion (experimental)").tag("diffusion")
+                }
+                .pickerStyle(.menu)
+            }
+            if vm.videoDecoder == "diffusion" {
+                Text("Sharper but several times slower, and needs ~22 GB at 1152×768.")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(10)
+        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+    }
 
     private var queueStatusBar: some View {
         Button(action: { showQueuePopover.toggle() }) {
